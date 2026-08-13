@@ -1,25 +1,29 @@
 """Yandex Market Partner API Adapter.
 
 API docs: https://yandex.ru/dev/market/partner/
-Auth: OAuth 2.0 + X-Business-Id header
+Auth: Api-Key (recommended) or OAuth (legacy)
 Base URL: https://api.partner.market.yandex.ru
 
 Key endpoints:
 - POST /v2/campaigns/{campaignId}/stats/orders — order stats
-- POST /v2/reports/united-marketplace-services/generate — finance report
+- POST /v2/campaigns/{campaignId}/offers/stocks — stocks
+- GET  /v2/campaigns/{campaignId}/offer-prices — prices
 - POST /v2/businesses/{businessId}/bids/info — bids/advert info
-- POST /v2/businesses/{businessId}/offer-mappings — product catalog
-- POST /v2/businesses/{businessId}/offers/stocks — stocks
+- POST /v2/reports/united-marketplace-services/generate — finance report
 
-Note: As of May 18, 2026, basic limits were reduced. Extended limits available with Medium subscription.
+Note: Api-Key is the recommended auth method. OAuth is legacy and may have limited access.
 """
 
 import httpx
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
 
 from app.adapters.base import MarketplaceAdapter
+from app.utils.retry import async_retry
+
+logger = logging.getLogger(__name__)
 
 
 class YandexMarketAdapter(MarketplaceAdapter):
@@ -29,38 +33,69 @@ class YandexMarketAdapter(MarketplaceAdapter):
 
     def __init__(self, shop_id: str, credentials: Dict[str, Any]):
         super().__init__(shop_id, credentials)
+        self.api_key = credentials.get("api_key", "")
         self.oauth_token = credentials.get("oauth_token", "")
         self.business_id = credentials.get("business_id", "")
         self.campaign_id = credentials.get("campaign_id", "")
-        self.headers = {
-            "Authorization": f"Bearer {self.oauth_token}",
-            "X-Business-Id": self.business_id,
-            "Content-Type": "application/json",
-        }
+
+        # Build headers based on auth method
+        if self.api_key:
+            self.headers = {
+                "Api-Key": self.api_key,
+                "Content-Type": "application/json",
+            }
+            self.auth_method = "api_key"
+        elif self.oauth_token:
+            self.headers = {
+                "Authorization": f"Bearer {self.oauth_token}",
+                "Content-Type": "application/json",
+            }
+            if self.business_id:
+                self.headers["X-Business-Id"] = self.business_id
+            self.auth_method = "oauth"
+        else:
+            raise ValueError("Either api_key or oauth_token must be provided in credentials")
 
     async def authenticate(self) -> bool:
-        """Check credentials by getting business info."""
+        """Check credentials by getting campaigns list.
+
+        Also auto-detects business_id from campaigns if not provided.
+        """
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.BASE_URL}/v2/businesses/{self.business_id}",
-                    headers=self.headers,
-                    timeout=10.0,
-                )
-                return response.status_code == 200
+            data = await self._get("/v2/campaigns", params={"limit": 10})
+            if isinstance(data, list) and len(data) > 0:
+                # Auto-detect business_id if not set
+                if not self.business_id:
+                    first_business = data[0].get("business", {})
+                    bid = first_business.get("id")
+                    if bid:
+                        self.business_id = str(bid)
+                        logger.info(f"Auto-detected YM Business ID: {self.business_id}")
+                return True
+            if isinstance(data, dict) and data.get("campaigns"):
+                if not self.business_id:
+                    first_business = data["campaigns"][0].get("business", {})
+                    bid = first_business.get("id")
+                    if bid:
+                        self.business_id = str(bid)
+                        logger.info(f"Auto-detected YM Business ID: {self.business_id}")
+                return True
+            return False
         except Exception:
             return False
 
+    @async_retry(max_retries=3, base_delay=1.0, max_delay=30.0)
     async def _get(self, endpoint: str, params: Optional[Dict] = None) -> Any:
-        """Make GET request to YM API."""
+        """Make GET request to YM API with retry."""
         url = f"{self.BASE_URL}{endpoint}"
         async with httpx.AsyncClient() as client:
             response = await client.get(url, headers=self.headers, params=params, timeout=30.0)
             response.raise_for_status()
             return response.json()
 
+    @async_retry(max_retries=3, base_delay=1.0, max_delay=30.0)
     async def _post(self, endpoint: str, data: Optional[Dict] = None) -> Any:
-        """Make POST request to YM API."""
+        """Make POST request to YM API with retry."""
         url = f"{self.BASE_URL}{endpoint}"
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=self.headers, json=data or {}, timeout=30.0)
@@ -89,8 +124,8 @@ class YandexMarketAdapter(MarketplaceAdapter):
                     "external_sku": str(product.get("offerId", "")),
                     "external_id": str(product.get("shopSku", "")),
                     "quantity": product.get("count", 1),
-                    "price": Decimal(str(product.get("initialPrice", 0))),
-                    "revenue": Decimal(str(product.get("buyerPrice", 0))),
+                    "price": Decimal(str(product.get("initialPrice", 0) or 0)),
+                    "revenue": Decimal(str(product.get("buyerPrice", 0) or 0)),
                     "commission": Decimal("0"),
                     "logistics": Decimal("0"),
                     "storage": Decimal("0"),
@@ -111,23 +146,25 @@ class YandexMarketAdapter(MarketplaceAdapter):
     async def get_stocks(self) -> List[Dict[str, Any]]:
         """Get stock levels from Yandex Market.
 
-        Uses /v2/businesses/{businessId}/offers/stocks
+        Uses /v2/campaigns/{campaignId}/offers/stocks
         """
         data = await self._post(
-            f"/v2/businesses/{self.business_id}/offers/stocks",
+            f"/v2/campaigns/{self.campaign_id}/offers/stocks",
             {"limit": 200},
         )
 
         stocks = []
-        for item in data.get("result", {}).get("warehouses", []):
-            for offer in item.get("offers", []):
-                stocks.append({
-                    "external_sku": str(offer.get("offerId", "")),
-                    "external_id": str(offer.get("shopSku", "")),
-                    "warehouse": item.get("warehouseName", "YM"),
-                    "quantity": offer.get("stock", 0),
-                    "in_way": 0,
-                })
+        offers = data.get("result", {}).get("offers", []) if isinstance(data, dict) else []
+        for offer in offers:
+            stock_entries = offer.get("stocks", [])
+            total_qty = sum(s.get("count", 0) for s in stock_entries)
+            stocks.append({
+                "external_sku": str(offer.get("offerId", "")),
+                "external_id": str(offer.get("offerId", "")),
+                "warehouse": stock_entries[0].get("warehouseName", "YM") if stock_entries else "YM",
+                "quantity": total_qty,
+                "in_way": 0,
+            })
         return stocks
 
     async def get_adverts(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
@@ -135,7 +172,10 @@ class YandexMarketAdapter(MarketplaceAdapter):
 
         Uses /v2/businesses/{businessId}/bids/info
         """
-        # Get bids info
+        if not self.business_id:
+            logger.warning("YM Business ID not available, skipping adverts")
+            return []
+
         data = await self._post(
             f"/v2/businesses/{self.business_id}/bids/info",
             {},
@@ -144,13 +184,13 @@ class YandexMarketAdapter(MarketplaceAdapter):
         adverts = []
         for item in data.get("result", {}).get("offers", []):
             adverts.append({
-                "date": datetime.utcnow(),
+                "date": datetime.now(timezone.utc),
                 "campaign_id": "",
                 "external_sku": str(item.get("offerId", "")),
-                "views": 0,  # YM bids API doesn't provide views/clicks directly
+                "views": 0,
                 "clicks": 0,
                 "ctr": Decimal("0"),
-                "cpc": Decimal(str(item.get("bid", 0))),
+                "cpc": Decimal(str(item.get("bid", 0) or 0)),
                 "spend": Decimal("0"),
                 "orders": 0,
                 "cr": Decimal("0"),
@@ -160,20 +200,22 @@ class YandexMarketAdapter(MarketplaceAdapter):
     async def get_prices(self) -> List[Dict[str, Any]]:
         """Get current prices from Yandex Market.
 
-        Uses /v2/businesses/{businessId}/offer-mappings
+        Uses /v2/campaigns/{campaignId}/offer-prices
         """
-        data = await self._post(
-            f"/v2/businesses/{self.business_id}/offer-mappings",
-            {"limit": 200},
+        data = await self._get(
+            f"/v2/campaigns/{self.campaign_id}/offer-prices",
+            params={"limit": 200},
         )
 
         prices = []
-        for item in data.get("result", {}).get("offerMappings", []):
-            offer = item.get("offer", {})
+        offers = data.get("result", {}).get("offers", []) if isinstance(data, dict) else []
+        for item in offers:
+            price_info = item.get("price", {})
+            price_val = price_info.get("value", 0) if isinstance(price_info, dict) else 0
             prices.append({
-                "external_sku": str(offer.get("offerId", "")),
-                "external_id": str(offer.get("shopSku", "")),
-                "price": Decimal(str(offer.get("price", {}).get("value", 0))),
+                "external_sku": str(item.get("id", "")),
+                "external_id": str(item.get("marketSku", "")),
+                "price": Decimal(str(price_val or 0)),
                 "discount": 0,
             })
         return prices
@@ -183,9 +225,12 @@ class YandexMarketAdapter(MarketplaceAdapter):
 
         Uses /v2/reports/united-marketplace-services/generate
         This is async — first request generates report, then we poll for status.
-        For simplicity, we'll use a simplified approach.
+        For simplicity, we return empty list (full implementation requires polling).
         """
-        # Generate report
+        if not self.business_id:
+            logger.warning("YM Business ID not available, skipping finance report")
+            return []
+
         gen_response = await self._post(
             "/v2/reports/united-marketplace-services/generate",
             {
@@ -195,6 +240,9 @@ class YandexMarketAdapter(MarketplaceAdapter):
             },
         )
 
-        # In real implementation, we would poll for report completion
-        # For now, return empty list (to be implemented with polling)
+        report_id = gen_response.get("result", {}).get("reportId")
+        if report_id:
+            logger.info(f"YM finance report generation started: {report_id}")
+
+        # TODO: Implement polling with GET /v2/reports/info/{reportId}
         return []

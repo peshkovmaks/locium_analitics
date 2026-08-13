@@ -1,10 +1,10 @@
 """Wildberries API Adapter.
 
 API docs: https://dev.wildberries.ru/
-Auth: API token in header 'Authorization: <token>'
+Auth: API token in header 'Authorization: '
 Base URL: https://statistics-api.wildberries.ru (for stats)
-          https://marketplace-api.wildberries.ru (for marketplace)
-          https://advert-api.wildberries.ru (for adverts)
+         https://marketplace-api.wildberries.ru (for marketplace)
+         https://advert-api.wildberries.ru (for adverts)
 
 Key endpoints:
 - GET /api/v1/supplier/sales — sales data
@@ -16,11 +16,15 @@ Key endpoints:
 """
 
 import httpx
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
 
 from app.adapters.base import MarketplaceAdapter
+from app.utils.retry import async_retry
+
+logger = logging.getLogger(__name__)
 
 
 class WildberriesAdapter(MarketplaceAdapter):
@@ -41,7 +45,6 @@ class WildberriesAdapter(MarketplaceAdapter):
         """Check if API key is valid by making a test request."""
         try:
             async with httpx.AsyncClient() as client:
-                # Try to get stocks as a lightweight test
                 response = await client.get(
                     f"{self.BASE_URLS['marketplace']}/api/v3/stocks",
                     headers=self.headers,
@@ -52,16 +55,18 @@ class WildberriesAdapter(MarketplaceAdapter):
         except Exception:
             return False
 
+    @async_retry(max_retries=3, base_delay=1.0, max_delay=30.0)
     async def _get(self, endpoint: str, base: str = "statistics", params: Optional[Dict] = None) -> Any:
-        """Make GET request to WB API."""
+        """Make GET request to WB API with retry."""
         url = f"{self.BASE_URLS[base]}{endpoint}"
         async with httpx.AsyncClient() as client:
             response = await client.get(url, headers=self.headers, params=params, timeout=30.0)
             response.raise_for_status()
             return response.json()
 
+    @async_retry(max_retries=3, base_delay=1.0, max_delay=30.0)
     async def _post(self, endpoint: str, base: str = "advert", data: Optional[Dict] = None) -> Any:
-        """Make POST request to WB API."""
+        """Make POST request to WB API with retry."""
         url = f"{self.BASE_URLS[base]}{endpoint}"
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=self.headers, json=data, timeout=30.0)
@@ -69,16 +74,7 @@ class WildberriesAdapter(MarketplaceAdapter):
             return response.json()
 
     async def get_sales(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
-        """Get sales data from WB.
-
-        Returns list of sales with fields:
-        - date, lastChangeDate, supplierArticle, techSize, barcode,
-        - totalPrice, discountPercent, isSupply, isRealization,
-        - promoCodeDiscount, warehouseName, countryName, oblastOkrugName,
-        - regionName, incomeID, saleID, odid, spp, forPay, finishedPrice,
-        - priceWithDisc, nmId, subject, category, brand, IsStorno, gNumber
-        """
-        # WB API requires date in format YYYY-MM-DD
+        """Get sales data from WB."""
         date_from_str = date_from.strftime("%Y-%m-%d")
         date_to_str = date_to.strftime("%Y-%m-%d")
 
@@ -95,8 +91,8 @@ class WildberriesAdapter(MarketplaceAdapter):
                 "external_id": str(item.get("nmId", "")),
                 "quantity": 1 if not item.get("IsStorno", False) else -1,
                 "price": Decimal(str(item.get("finishedPrice", 0) or item.get("totalPrice", 0))),
-                "revenue": Decimal(str(item.get("forPay", 0))),
-                "commission": Decimal("0"),  # Will be calculated from finance report
+                "revenue": Decimal(str(item.get("forPay", 0) or 0)),
+                "commission": Decimal("0"),
                 "logistics": Decimal("0"),
                 "storage": Decimal("0"),
                 "advertising": Decimal("0"),
@@ -123,7 +119,7 @@ class WildberriesAdapter(MarketplaceAdapter):
                 "external_sku": item.get("supplierArticle", ""),
                 "external_id": str(item.get("nmId", "")),
                 "quantity": item.get("quantity", 1),
-                "price": Decimal(str(item.get("totalPrice", 0))),
+                "price": Decimal(str(item.get("totalPrice", 0) or 0)),
                 "status": "ordered",
             })
         return orders
@@ -148,14 +144,12 @@ class WildberriesAdapter(MarketplaceAdapter):
 
     async def get_adverts(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         """Get advertising campaigns and stats."""
-        # First, get list of campaigns
         campaigns = await self._get("/adv/v1/promotion/adverts", base="advert")
 
         adverts = []
         if not campaigns:
             return adverts
 
-        # Get full stats for each campaign
         campaign_ids = [c.get("advertId") for c in campaigns if c.get("advertId")]
 
         if campaign_ids:
@@ -176,7 +170,7 @@ class WildberriesAdapter(MarketplaceAdapter):
                     adverts.append({
                         "date": datetime.strptime(day_stat.get("date", ""), "%Y-%m-%d"),
                         "campaign_id": str(stat.get("advertId", "")),
-                        "external_sku": "",  # WB stats don't always include SKU per day
+                        "external_sku": "",
                         "views": day_stat.get("views", 0),
                         "clicks": day_stat.get("clicks", 0),
                         "ctr": Decimal(str(day_stat.get("ctr", 0))),
@@ -201,21 +195,16 @@ class WildberriesAdapter(MarketplaceAdapter):
             prices.append({
                 "external_sku": item.get("vendorCode", ""),
                 "external_id": str(item.get("nmID", "")),
-                "price": Decimal(str(item.get("price", 0))),
+                "price": Decimal(str(item.get("price", 0) or 0)),
                 "discount": item.get("discount", 0),
             })
         return prices
 
     async def get_finance_report(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
-        """Get detailed finance report.
-
-        This is the key method for calculating real expenses (commission, logistics, etc.)
-        """
-        # WB requires date in format YYYY-MM-DD
+        """Get detailed finance report."""
         date_from_str = date_from.strftime("%Y-%m-%d")
         date_to_str = date_to.strftime("%Y-%m-%d")
 
-        # Get realization reports
         data = await self._get(
             "/api/v5/supplier/reportDetailByPeriod",
             params={
@@ -232,12 +221,12 @@ class WildberriesAdapter(MarketplaceAdapter):
                 "external_sku": item.get("sa_name", ""),
                 "external_id": str(item.get("nm_id", "")),
                 "quantity": item.get("quantity", 0),
-                "price": Decimal(str(item.get("retail_price", 0))),
-                "revenue": Decimal(str(item.get("retail_amount", 0))),
-                "commission": Decimal(str(item.get("commission_amount", 0))),
-                "logistics": Decimal(str(item.get("delivery_rub", 0))),
-                "storage": Decimal(str(item.get("storage_fee", 0))),
-                "returns": Decimal(str(item.get("return_amount", 0))),
-                "other": Decimal(str(item.get("deduction", 0))),
+                "price": Decimal(str(item.get("retail_price", 0) or 0)),
+                "revenue": Decimal(str(item.get("retail_amount", 0) or 0)),
+                "commission": Decimal(str(item.get("commission_amount", 0) or 0)),
+                "logistics": Decimal(str(item.get("delivery_rub", 0) or 0)),
+                "storage": Decimal(str(item.get("storage_fee", 0) or 0)),
+                "returns": Decimal(str(item.get("return_amount", 0) or 0)),
+                "other": Decimal(str(item.get("deduction", 0) or 0)),
             })
         return reports
