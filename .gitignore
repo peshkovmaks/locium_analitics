@@ -1,0 +1,36 @@
+# Environment variables (пароли, ключи)
+.env
+.env.local
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+
+# Virtual environment
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test results
+ozon_test_results_*.json
+
+# Docker volumes
+postgres_data/
+redis_data/
+
+# Alembic cache
+alembic/versions/*.pyc
