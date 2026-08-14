@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 from app.config import get_settings
 
 settings = get_settings()
@@ -16,6 +17,7 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="Europe/Moscow",
     enable_utc=True,
+    broker_connection_retry_on_startup=True,
     beat_schedule={
         "sync-every-4-hours": {
             "task": "app.tasks.sync.sync_all_shops_task",
@@ -23,7 +25,7 @@ celery_app.conf.update(
         },
         "daily-report-21-00": {
             "task": "app.tasks.sync.send_daily_report_task",
-            "schedule": "crontab(hour=21, minute=0)",
+            "schedule": crontab(hour=21, minute=0),
         },
         "check-alerts-every-hour": {
             "task": "app.tasks.sync.check_alerts_task",

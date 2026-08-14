@@ -16,12 +16,18 @@ class SyncService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def sync_shop(self, shop: Shop, days_back: int = 1) -> Dict[str, Any]:
-        """Sync all data for a single shop."""
+    async def sync_shop(
+        self, shop: Shop, days_back: int = 1, credentials: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
+        """Sync all data for a single shop.
+
+        credentials can be provided decrypted (e.g. from manual sync) without
+        mutating the ORM shop.credentials field.
+        """
         adapter = AdapterFactory.create(
             shop.marketplace.value,
             str(shop.id),
-            shop.credentials,
+            credentials if credentials is not None else shop.credentials,
         )
 
         if not await adapter.authenticate():
@@ -85,7 +91,7 @@ class SyncService:
             try:
                 finance = await adapter.get_finance_report(date_from, date_to)
                 if finance:
-                    await self._update_finance_data(shop.id, finance)
+                    await self._update_finance_data(shop.id, finance, date_from, date_to)
                     results["finance_records"] = len(finance)
             except Exception as e:
                 results["finance_error"] = str(e)
@@ -225,16 +231,20 @@ class SyncService:
             )
             self.db.add(new_mapping)
 
-    async def _update_finance_data(self, shop_id, finance: List[Dict[str, Any]]):
+    async def _update_finance_data(
+        self, shop_id, finance: List[Dict[str, Any]], date_from: datetime, date_to: datetime
+    ):
         for item in finance:
             result = await self.db.execute(
                 select(Sale).where(
                     Sale.shop_id == shop_id,
                     Sale.external_sku == item["external_sku"],
+                    Sale.date >= date_from,
+                    Sale.date <= date_to,
                 )
             )
-            sale = result.scalar_one_or_none()
-            if sale:
+            sales = result.scalars().all()
+            for sale in sales:
                 sale.commission = item.get("commission", sale.commission)
                 sale.logistics = item.get("logistics", sale.logistics)
                 sale.storage = item.get("storage", sale.storage)

@@ -13,7 +13,7 @@ def get_fernet() -> Fernet:
     global _fernet
     if _fernet is None:
         import base64
-        key = settings.secret_key[:32].ljust(32, "0")
+        key = settings.encryption_key[:32].ljust(32, "0")
         encoded_key = base64.urlsafe_b64encode(key.encode())
         _fernet = Fernet(encoded_key)
     return _fernet

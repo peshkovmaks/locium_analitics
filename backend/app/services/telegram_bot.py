@@ -121,16 +121,11 @@ class TelegramBotService:
 """
         for mp_name, data in mp_data.items():
             message += f"• {mp_name}: {self._format_money(data['revenue'])} | маржа {data['margin']:.0f}%\n"
-"
-"
 
         if top_products:
-            message += "
-Топ-3 товара:
-"
+            message += "\nТоп-3 товара:\n"
             for name, profit in top_products:
-                message += f"• {name[:30]}... — {self._format_money(profit)}
-"
+                message += f"• {name[:30]}... — {self._format_money(profit)}\n"
 
         try:
             await self.bot.send_message(

@@ -25,8 +25,21 @@ venv/
 .DS_Store
 Thumbs.db
 
+# Backup files
+*.bak
+
 # Test results
 ozon_test_results_*.json
+ym_test_results_*.json
+
+# Root drafts / scratch files
+ozon_v3.py
+test_ozon.py
+test_wb.py
+test_ym.py
+fix_shops.sh
+Dashboard.jsx
+dashboard.html
 
 # Docker volumes
 postgres_data/

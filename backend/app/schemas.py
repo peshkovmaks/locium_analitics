@@ -51,14 +51,14 @@ class ProductUpdate(BaseModel):
     category: Optional[str] = None
 
 
-class ProductCostUpdate(BaseModel):  # ← ДОБАВИТЬ
+class ProductCostUpdate(BaseModel):
     cost_price: float = Field(..., ge=0)
 
 
 class ProductOut(BaseModel):
     id: UUID
     sku: str
-    canonical_sku: Optional[str]  # ← ДОБАВИТЬ
+    canonical_sku: Optional[str]
     name: str
     cost_price: Decimal
     min_price: Decimal

@@ -76,8 +76,8 @@ async def manual_sync(
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
-    shop.credentials = decrypt_dict(shop.credentials)
+    decrypted_credentials = decrypt_dict(shop.credentials)
 
     sync_service = SyncService(db)
-    result = await sync_service.sync_shop(shop, days_back=1)
+    result = await sync_service.sync_shop(shop, days_back=1, credentials=decrypted_credentials)
     return result
