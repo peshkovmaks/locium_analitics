@@ -6,13 +6,13 @@ Usage:
     python test_ozon.py --client-id YOUR_CLIENT_ID --api-key your-api-key-here
 
 What it tests:
-1. Authentication (warehouse/list)
-2. Product list with prices (v4/product/info/prices)
-3. Stocks (v3/product/info/stocks-by-warehouse/fbs)
+1. Authentication (v2/warehouse/list)
+2. Product list with prices (v5/product/info/prices)
+3. Stocks (v3/product/info/stocks)
 4. Orders FBO (v2/posting/fbo/list)
 5. Orders FBS (v3/posting/fbs/list)
 6. Analytics data (v1/analytics/data)
-7. Campaign list (v1/campaign/list)
+7. Campaign list — SKIPPED (requires Ozon Performance API, separate OAuth)
 
 Output: saves results to ozon_test_results.json
 """
@@ -20,7 +20,7 @@ Output: saves results to ozon_test_results.json
 import argparse
 import json
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import httpx
 
@@ -58,8 +58,8 @@ class OzonTester:
 
     async def test_auth(self):
         """Test 1: Check if credentials work."""
-        print("\n🧪 Test 1: Authentication (warehouse/list)")
-        result = await self._post("/v1/warehouse/list", {})
+        print("\n🧪 Test 1: Authentication (v2/warehouse/list)")
+        result = await self._post("/v2/warehouse/list", {})
 
         if result.get("error"):
             print(f"   ❌ FAILED: {result.get('status_code')} - {result.get('message')}")
@@ -69,15 +69,19 @@ class OzonTester:
         warehouses = result.get("warehouses", [])
         print(f"   ✅ OK! Found {len(warehouses)} warehouses")
         for wh in warehouses[:3]:
-            print(f"      • {wh.get('name', 'Unknown')} (ID: {wh.get('warehouse_id')})")
+            print(f"   • {wh.get('name', 'Unknown')} (ID: {wh.get('warehouse_id')})")
 
         self.results["auth"] = {"success": True, "warehouses_count": len(warehouses), "warehouses": warehouses[:3]}
         return True
 
     async def test_products(self):
         """Test 2: Get product list with prices."""
-        print("\n🧪 Test 2: Products + Prices (v4/product/info/prices)")
-        result = await self._post("/v4/product/info/prices", {"limit": 50, "offset": 0})
+        print("\n🧪 Test 2: Products + Prices (v5/product/info/prices)")
+        result = await self._post("/v5/product/info/prices", {
+            "filter": {"visibility": "ALL"},
+            "limit": 50,
+            "cursor": "",
+        })
 
         if result.get("error"):
             print(f"   ❌ FAILED: {result.get('message')}")
@@ -89,9 +93,9 @@ class OzonTester:
 
         for item in items[:5]:
             sku = item.get("offer_id", "N/A")
-            price = item.get("price", 0)
-            stock = item.get("stock", 0)
-            print(f"      • SKU: {sku} | Price: {price}₽ | Stock: {stock}")
+            price_info = item.get("price", {})
+            price = price_info.get("price", 0) if isinstance(price_info, dict) else item.get("price", 0)
+            print(f"   • SKU: {sku} | Price: {price}₽")
 
         self.results["products"] = {
             "count": len(items),
@@ -99,9 +103,16 @@ class OzonTester:
         }
 
     async def test_stocks(self):
-        """Test 3: Get stock levels."""
-        print("\n🧪 Test 3: Stocks (v3/product/info/stocks-by-warehouse/fbs)")
-        result = await self._post("/v3/product/info/stocks-by-warehouse/fbs", {"limit": 50, "offset": 0})
+        """Test 3: Get stock levels.
+
+        Uses /v3/product/info/stocks since /v1/v2/v3 stocks-by-warehouse
+        endpoints are either deprecated or undocumented.
+        """
+        print("\n🧪 Test 3: Stocks (v3/product/info/stocks)")
+        result = await self._post("/v3/product/info/stocks", {
+            "page": 1,
+            "page_size": 50,
+        })
 
         if result.get("error"):
             print(f"   ❌ FAILED: {result.get('message')}")
@@ -113,9 +124,9 @@ class OzonTester:
 
         for item in items[:5]:
             sku = item.get("offer_id", "N/A")
-            qty = item.get("quantity", 0)
-            wh = item.get("warehouse_name", "FBS")
-            print(f"      • SKU: {sku} | Qty: {qty} | Warehouse: {wh}")
+            stocks = item.get("stocks", [])
+            total_qty = sum(s.get("present", 0) for s in stocks)
+            print(f"   • SKU: {sku} | Total Qty: {total_qty} | Warehouses: {len(stocks)}")
 
         self.results["stocks"] = {
             "count": len(items),
@@ -126,14 +137,14 @@ class OzonTester:
         """Test 4: Get FBO orders."""
         print("\n🧪 Test 4: FBO Orders (v2/posting/fbo/list)")
 
-        date_to = datetime.utcnow()
+        date_to = datetime.now(timezone.utc)
         date_from = date_to - timedelta(days=7)
 
         result = await self._post("/v2/posting/fbo/list", {
             "dir": "ASC",
             "filter": {
-                "since": date_from.isoformat() + "Z",
-                "to": date_to.isoformat() + "Z",
+                "since": date_from.isoformat().replace("+00:00", "Z"),
+                "to": date_to.isoformat().replace("+00:00", "Z"),
             },
             "limit": 50,
             "offset": 0,
@@ -150,8 +161,8 @@ class OzonTester:
 
         for order in orders[:3]:
             products = order.get("products", [])
-            total = sum(p.get("price", 0) * p.get("quantity", 1) for p in products)
-            print(f"      • Order {order.get('posting_number', 'N/A')} | {len(products)} items | {total}₽ | Status: {order.get('status')}")
+            total = sum(float(p.get("price", 0) or 0) * p.get("quantity", 1) for p in products)
+            print(f"   • Order {order.get('posting_number', 'N/A')} | {len(products)} items | {total:.2f}₽ | Status: {order.get('status')}")
 
         self.results["orders_fbo"] = {
             "count": len(orders),
@@ -162,14 +173,14 @@ class OzonTester:
         """Test 5: Get FBS orders."""
         print("\n🧪 Test 5: FBS Orders (v3/posting/fbs/list)")
 
-        date_to = datetime.utcnow()
+        date_to = datetime.now(timezone.utc)
         date_from = date_to - timedelta(days=7)
 
         result = await self._post("/v3/posting/fbs/list", {
             "dir": "ASC",
             "filter": {
-                "since": date_from.isoformat() + "Z",
-                "to": date_to.isoformat() + "Z",
+                "since": date_from.isoformat().replace("+00:00", "Z"),
+                "to": date_to.isoformat().replace("+00:00", "Z"),
             },
             "limit": 50,
             "offset": 0,
@@ -186,8 +197,8 @@ class OzonTester:
 
         for order in orders[:3]:
             products = order.get("products", [])
-            total = sum(p.get("price", 0) * p.get("quantity", 1) for p in products)
-            print(f"      • Order {order.get('posting_number', 'N/A')} | {len(products)} items | {total}₽ | Status: {order.get('status')}")
+            total = sum(float(p.get("price", 0) or 0) * p.get("quantity", 1) for p in products)
+            print(f"   • Order {order.get('posting_number', 'N/A')} | {len(products)} items | {total:.2f}₽ | Status: {order.get('status')}")
 
         self.results["orders_fbs"] = {
             "count": len(orders),
@@ -198,7 +209,7 @@ class OzonTester:
         """Test 6: Get analytics data."""
         print("\n🧪 Test 6: Analytics (v1/analytics/data)")
 
-        date_to = datetime.utcnow()
+        date_to = datetime.now(timezone.utc)
         date_from = date_to - timedelta(days=7)
 
         result = await self._post("/v1/analytics/data", {
@@ -225,7 +236,7 @@ class OzonTester:
             sku = dims.get("sku", "N/A")
             ordered = metrics[0] if len(metrics) > 0 else 0
             revenue = metrics[1] if len(metrics) > 1 else 0
-            print(f"      • SKU: {sku} | Ordered: {ordered} | Revenue: {revenue}₽")
+            print(f"   • SKU: {sku} | Ordered: {ordered} | Revenue: {revenue}₽")
 
         self.results["analytics"] = {
             "count": len(data),
@@ -233,28 +244,23 @@ class OzonTester:
         }
 
     async def test_campaigns(self):
-        """Test 7: Get advert campaigns."""
-        print("\n🧪 Test 7: Ad Campaigns (v1/campaign/list)")
-        result = await self._post("/v1/campaign/list", {})
+        """Test 7: Get advert campaigns.
 
-        if result.get("error"):
-            print(f"   ❌ FAILED: {result.get('message')}")
-            self.results["campaigns"] = result
-            return
-
-        campaigns = result.get("campaigns", [])
-        print(f"   ✅ OK! Found {len(campaigns)} campaigns")
-
-        for camp in campaigns[:5]:
-            print(f"      • Campaign {camp.get('campaignId')}: {camp.get('title', 'No title')} | Status: {camp.get('state')}")
+        SKIPPED: Ozon Seller API (api-seller.ozon.ru) does not provide
+        advertising campaign endpoints. Ad data requires Ozon Performance API
+        (api-performance.ozon.ru) with OAuth authentication.
+        """
+        print("\n🧪 Test 7: Ad Campaigns")
+        print("   ⏭️  SKIPPED: Ozon ads require Performance API (OAuth)")
+        print("   Seller API (api-seller.ozon.ru) has no /v1/campaign/list endpoint")
 
         self.results["campaigns"] = {
-            "count": len(campaigns),
-            "sample": campaigns[:5],
+            "skipped": True,
+            "reason": "Ozon Performance API required (OAuth, separate from Seller API)",
         }
 
     async def run_all_tests(self):
-        """Run all tests."""
+        """Run all tests with rate limiting delays."""
         print("=" * 60)
         print("Ozon Seller API Test")
         print("=" * 60)
@@ -266,12 +272,23 @@ class OzonTester:
             print("\n❌ Authentication failed. Check your credentials.")
             return False
 
-        # Run other tests
+        # Rate limit: 1 second delay between requests
+        await asyncio.sleep(1)
         await self.test_products()
+
+        await asyncio.sleep(1)
         await self.test_stocks()
+
+        await asyncio.sleep(1)
         await self.test_orders_fbo()
+
+        await asyncio.sleep(1)
         await self.test_orders_fbs()
+
+        await asyncio.sleep(1)
         await self.test_analytics()
+
+        await asyncio.sleep(1)
         await self.test_campaigns()
 
         # Save results

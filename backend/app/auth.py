@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,21 +13,21 @@ settings = get_settings()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
-
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    # bcrypt has 72 bytes limit
+    plain_password = plain_password[:72]
     return pwd_context.verify(plain_password, hashed_password)
 
-
 def get_password_hash(password: str) -> str:
+    # bcrypt has 72 bytes limit — truncate to avoid ValueError
+    password = password[:72]
     return pwd_context.hash(password)
-
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=settings.access_token_expire_minutes))
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.access_token_expire_minutes))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
-
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -51,7 +51,6 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     return user
-
 
 async def get_current_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != UserRole.admin:

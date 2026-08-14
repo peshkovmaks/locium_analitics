@@ -1,0 +1,400 @@
+{
+  "auth": {
+    "success": true,
+    "campaigns_count": 3,
+    "campaigns": [
+      {
+        "domain": "Экспресс доставка",
+        "id": 23594730,
+        "clientId": 97704816,
+        "business": {
+          "id": 5975487,
+          "name": "ТРАВКИ"
+        },
+        "placementType": "FBS",
+        "apiAvailability": "AVAILABLE"
+      },
+      {
+        "domain": "Офис самостоятельная отправка",
+        "id": 35125865,
+        "clientId": 97704816,
+        "business": {
+          "id": 5975487,
+          "name": "ТРАВКИ"
+        },
+        "placementType": "FBS",
+        "apiAvailability": "AVAILABLE"
+      },
+      {
+        "domain": "Люберцы",
+        "id": 90279888,
+        "clientId": 97704816,
+        "business": {
+          "id": 5975487,
+          "name": "ТРАВКИ"
+        },
+        "placementType": "FBS",
+        "apiAvailability": "AVAILABLE"
+      }
+    ]
+  },
+  "orders": {
+    "count": 8,
+    "sample": [
+      {
+        "id": 59997399937,
+        "creationDate": "2026-08-06",
+        "statusUpdateDate": "2026-08-09T22:15:45.128+03:00",
+        "status": "DELIVERED",
+        "partnerOrderId": "59997399937",
+        "paymentType": "PREPAID",
+        "fake": false,
+        "deliveryRegion": {
+          "id": 213,
+          "name": "Москва"
+        },
+        "items": [
+          {
+            "offerName": "чай травки для разных моментов / для бодрости / для спокойствия / для удовольствия / имбирь и лимон / для красоты",
+            "marketSku": 103279757607,
+            "shopSku": "travki-assorti",
+            "count": 1,
+            "prices": [
+              {
+                "type": "MARKETPLACE",
+                "costPerItem": 411.0,
+                "total": 411.0
+              },
+              {
+                "type": "CASHBACK",
+                "costPerItem": 10.0,
+                "total": 10.0
+              },
+              {
+                "type": "BUYER",
+                "costPerItem": 372.0,
+                "total": 372.0
+              }
+            ],
+            "warehouse": {
+              "id": 1371280,
+              "name": "Братиславская"
+            },
+            "bidFee": 176
+          }
+        ],
+        "payments": [
+          {
+            "id": "1540500506",
+            "date": "2026-08-06",
+            "type": "PAYMENT",
+            "source": "BUYER",
+            "total": 372.0
+          }
+        ],
+        "commissions": [
+          {
+            "type": "CROSSREGIONAL_DELIVERY",
+            "actual": 1.0
+          },
+          {
+            "type": "PAYMENT_TRANSFER",
+            "actual": 12.69
+          },
+          {
+            "type": "FEE",
+            "actual": 2.78
+          },
+          {
+            "type": "DELIVERY_TO_CUSTOMER",
+            "actual": 39.65
+          },
+          {
+            "type": "AGENCY",
+            "actual": 0.12
+          }
+        ],
+        "subsidies": [
+          {
+            "operationType": "ACCRUAL",
+            "type": "YANDEX_CASHBACK",
+            "amount": 10.0
+          },
+          {
+            "operationType": "ACCRUAL",
+            "type": "SUBSIDY",
+            "amount": 411.0
+          }
+        ],
+        "buyerType": "PERSON",
+        "currency": "RUR"
+      },
+      {
+        "id": 59981963074,
+        "creationDate": "2026-08-06",
+        "statusUpdateDate": "2026-08-09T21:38:57.285+03:00",
+        "status": "DELIVERED",
+        "partnerOrderId": "59981963074",
+        "paymentType": "PREPAID",
+        "fake": false,
+        "deliveryRegion": {
+          "id": 213,
+          "name": "Москва"
+        },
+        "items": [
+          {
+            "offerName": "чай травки для разных моментов / для бодрости / для спокойствия / для удовольствия / имбирь и лимон / для красоты",
+            "marketSku": 103279757607,
+            "shopSku": "travki-assorti",
+            "count": 1,
+            "prices": [
+              {
+                "type": "MARKETPLACE",
+                "costPerItem": 343.0,
+                "total": 343.0
+              },
+              {
+                "type": "BUYER",
+                "costPerItem": 450.0,
+                "total": 450.0
+              }
+            ],
+            "warehouse": {
+              "id": 1371280,
+              "name": "Братиславская"
+            },
+            "bidFee": 176
+          },
+          {
+            "offerName": "чай травки для спокойствия, травяной, без ароматизаторов, 22 пакетика",
+            "marketSku": 101699351216,
+            "shopSku": "4620028263209",
+            "count": 1,
+            "prices": [
+              {
+                "type": "MARKETPLACE",
+                "costPerItem": 344.0,
+                "total": 344.0
+              },
+              {
+                "type": "BUYER",
+                "costPerItem": 462.0,
+                "total": 462.0
+              }
+            ],
+            "warehouse": {
+              "id": 1371280,
+              "name": "Братиславская"
+            },
+            "bidFee": 414
+          }
+        ],
+        "payments": [
+          {
+            "id": "1539922037",
+            "date": "2026-08-06",
+            "type": "PAYMENT",
+            "source": "BUYER",
+            "total": 450.0
+          },
+          {
+            "id": "1539922038",
+            "date": "2026-08-06",
+            "type": "PAYMENT",
+            "source": "BUYER",
+            "total": 462.0
+          }
+        ],
+        "commissions": [
+          {
+            "type": "FEE",
+            "actual": 5.61
+          },
+          {
+            "type": "CROSSREGIONAL_DELIVERY",
+            "actual": 2.0
+          },
+          {
+            "type": "PAYMENT_TRANSFER",
+            "actual": 25.59
+          },
+          {
+            "type": "AGENCY",
+            "actual": 0.24
+          },
+          {
+            "type": "AUCTION_PROMOTION",
+            "actual": 2.0
+          },
+          {
+            "type": "DELIVERY_TO_CUSTOMER",
+            "actual": 79.95
+          }
+        ],
+        "subsidies": [
+          {
+            "operationType": "ACCRUAL",
+            "type": "SUBSIDY",
+            "amount": 343.0
+          },
+          {
+            "operationType": "ACCRUAL",
+            "type": "SUBSIDY",
+            "amount": 344.0
+          }
+        ],
+        "buyerType": "PERSON",
+        "currency": "RUR"
+      },
+      {
+        "id": 59981948289,
+        "creationDate": "2026-08-06",
+        "statusUpdateDate": "2026-08-11T15:23:37.895+03:00",
+        "status": "DELIVERED",
+        "partnerOrderId": "59981948289",
+        "paymentType": "PREPAID",
+        "fake": false,
+        "deliveryRegion": {
+          "id": 219,
+          "name": "Черноголовка"
+        },
+        "items": [
+          {
+            "offerName": "Чай Травки \"Чтобы лето не кончалось\", травяной, в пакетиках, без ароматизаторов",
+            "marketSku": 103295446610,
+            "shopSku": "travki_chln",
+            "count": 1,
+            "prices": [
+              {
+                "type": "MARKETPLACE",
+                "costPerItem": 340.0,
+                "total": 340.0
+              },
+              {
+                "type": "BUYER",
+                "costPerItem": 466.0,
+                "total": 466.0
+              }
+            ],
+            "warehouse": {
+              "id": 1371280,
+              "name": "Братиславская"
+            },
+            "bidFee": 173
+          }
+        ],
+        "payments": [
+          {
+            "id": "1539920224",
+            "date": "2026-08-06",
+            "type": "PAYMENT",
+            "source": "BUYER",
+            "total": 466.0
+          }
+        ],
+        "commissions": [
+          {
+            "type": "PAYMENT_TRANSFER",
+            "actual": 12.9
+          },
+          {
+            "type": "DELIVERY_TO_CUSTOMER",
+            "actual": 40.3
+          },
+          {
+            "type": "AGENCY",
+            "actual": 0.12
+          },
+          {
+            "type": "AUCTION_PROMOTION",
+            "actual": 1.0
+          },
+          {
+            "type": "FEE",
+            "actual": 2.83
+          },
+          {
+            "type": "CROSSREGIONAL_DELIVERY",
+            "actual": 1.0
+          }
+        ],
+        "subsidies": [
+          {
+            "operationType": "ACCRUAL",
+            "type": "SUBSIDY",
+            "amount": 340.0
+          }
+        ],
+        "buyerType": "PERSON",
+        "currency": "RUR"
+      }
+    ]
+  },
+  "stocks": {
+    "count": 0,
+    "sample": []
+  },
+  "prices": {
+    "count": 25,
+    "sample": [
+      {
+        "id": "12345-55",
+        "price": {
+          "value": 2350,
+          "discountBase": 2590,
+          "currencyId": "RUR",
+          "vat": 6
+        },
+        "updatedAt": "2024-02-28T13:54:45+03:00"
+      },
+      {
+        "id": "4620028263186",
+        "price": {
+          "value": 1050,
+          "discountBase": 1150,
+          "currencyId": "RUR",
+          "vat": 6
+        },
+        "updatedAt": "2023-06-14T19:32:22+03:00"
+      },
+      {
+        "id": "4620028263186-10",
+        "price": {
+          "value": 5290,
+          "discountBase": 6500,
+          "currencyId": "RUR",
+          "vat": 6
+        },
+        "updatedAt": "2026-07-21T17:06:55+03:00"
+      },
+      {
+        "id": "4620028263193",
+        "price": {
+          "value": 1050,
+          "discountBase": 1150,
+          "currencyId": "RUR",
+          "vat": 6
+        },
+        "updatedAt": "2023-06-14T19:32:22+03:00"
+      },
+      {
+        "id": "4620028263193-10",
+        "price": {
+          "value": 4900,
+          "discountBase": 6500,
+          "currencyId": "RUR",
+          "vat": 6
+        },
+        "updatedAt": "2026-07-21T17:06:55+03:00"
+      }
+    ]
+  },
+  "bids": {
+    "count": 0,
+    "sample": []
+  },
+  "finance": {
+    "report_id": "8d5bce96-41e4-4dbc-9df4-91afe9d90fc2",
+    "status": "generating"
+  }
+}

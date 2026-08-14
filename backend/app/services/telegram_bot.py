@@ -120,7 +120,8 @@ class TelegramBotService:
 По площадкам:
 """
         for mp_name, data in mp_data.items():
-            message += f"• {mp_name}: {self._format_money(data['revenue'])} | маржа {data['margin']:.0f}%
+            message += f"• {mp_name}: {self._format_money(data['revenue'])} | маржа {data['margin']:.0f}%\n"
+"
 "
 
         if top_products:

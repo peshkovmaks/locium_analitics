@@ -13,7 +13,7 @@ from app.utils.encryption import encrypt_dict, decrypt_dict
 router = APIRouter()
 
 
-@router.get("/", response_model=List[ShopOut])
+@router.get("/shops", response_model=List[ShopOut])
 async def list_shops(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -22,7 +22,7 @@ async def list_shops(
     return result.scalars().all()
 
 
-@router.post("/", response_model=ShopOut)
+@router.post("/shops", response_model=ShopOut)
 async def create_shop(
     data: ShopCreate,
     db: AsyncSession = Depends(get_db),

@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 from datetime import datetime
 
-
 class MarketplaceAdapter(ABC):
     """Base adapter for all marketplaces."""
 
@@ -52,17 +51,19 @@ class AdapterFactory:
 
     @classmethod
     def create(cls, marketplace: str, shop_id: str, credentials: Dict[str, Any]) -> MarketplaceAdapter:
+        # Lazy import to avoid circular imports
+        if not cls._adapters:
+            from app.adapters.wildberries import WildberriesAdapter
+            from app.adapters.ozon import OzonAdapter
+            from app.adapters.yandex_market import YandexMarketAdapter
+
+            cls._adapters = {
+                "wb": WildberriesAdapter,
+                "ozon": OzonAdapter,
+                "ym": YandexMarketAdapter,
+            }
+
         adapter_class = cls._adapters.get(marketplace)
         if not adapter_class:
             raise ValueError(f"Unknown marketplace: {marketplace}")
         return adapter_class(shop_id, credentials)
-
-
-# Register adapters
-from app.adapters.wildberries import WildberriesAdapter
-from app.adapters.ozon import OzonAdapter
-from app.adapters.yandex_market import YandexMarketAdapter
-
-AdapterFactory.register("wb", WildberriesAdapter)
-AdapterFactory.register("ozon", OzonAdapter)
-AdapterFactory.register("ym", YandexMarketAdapter)

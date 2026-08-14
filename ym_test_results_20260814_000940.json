@@ -1,0 +1,1574 @@
+{
+  "auth": {
+    "success": true,
+    "campaigns_count": 3,
+    "campaigns": [
+      {
+        "domain": "Экспресс доставка",
+        "id": 23594730,
+        "clientId": 97704816,
+        "business": {
+          "id": 5975487,
+          "name": "ТРАВКИ"
+        },
+        "placementType": "FBS",
+        "apiAvailability": "AVAILABLE"
+      },
+      {
+        "domain": "Офис самостоятельная отправка",
+        "id": 35125865,
+        "clientId": 97704816,
+        "business": {
+          "id": 5975487,
+          "name": "ТРАВКИ"
+        },
+        "placementType": "FBS",
+        "apiAvailability": "AVAILABLE"
+      },
+      {
+        "domain": "Люберцы",
+        "id": 90279888,
+        "clientId": 97704816,
+        "business": {
+          "id": 5975487,
+          "name": "ТРАВКИ"
+        },
+        "placementType": "FBS",
+        "apiAvailability": "AVAILABLE"
+      }
+    ]
+  },
+  "orders": {
+    "count": 8,
+    "sample": [
+      {
+        "id": 59997399937,
+        "creationDate": "2026-08-06",
+        "statusUpdateDate": "2026-08-09T22:15:45.128+03:00",
+        "status": "DELIVERED",
+        "partnerOrderId": "59997399937",
+        "paymentType": "PREPAID",
+        "fake": false,
+        "deliveryRegion": {
+          "id": 213,
+          "name": "Москва"
+        },
+        "items": [
+          {
+            "offerName": "чай травки для разных моментов / для бодрости / для спокойствия / для удовольствия / имбирь и лимон / для красоты",
+            "marketSku": 103279757607,
+            "shopSku": "travki-assorti",
+            "count": 1,
+            "prices": [
+              {
+                "type": "MARKETPLACE",
+                "costPerItem": 411.0,
+                "total": 411.0
+              },
+              {
+                "type": "CASHBACK",
+                "costPerItem": 10.0,
+                "total": 10.0
+              },
+              {
+                "type": "BUYER",
+                "costPerItem": 372.0,
+                "total": 372.0
+              }
+            ],
+            "warehouse": {
+              "id": 1371280,
+              "name": "Братиславская"
+            },
+            "bidFee": 176
+          }
+        ],
+        "payments": [
+          {
+            "id": "1540500506",
+            "date": "2026-08-06",
+            "type": "PAYMENT",
+            "source": "BUYER",
+            "total": 372.0
+          }
+        ],
+        "commissions": [
+          {
+            "type": "CROSSREGIONAL_DELIVERY",
+            "actual": 1.0
+          },
+          {
+            "type": "PAYMENT_TRANSFER",
+            "actual": 12.69
+          },
+          {
+            "type": "FEE",
+            "actual": 2.78
+          },
+          {
+            "type": "DELIVERY_TO_CUSTOMER",
+            "actual": 39.65
+          },
+          {
+            "type": "AGENCY",
+            "actual": 0.12
+          }
+        ],
+        "subsidies": [
+          {
+            "operationType": "ACCRUAL",
+            "type": "YANDEX_CASHBACK",
+            "amount": 10.0
+          },
+          {
+            "operationType": "ACCRUAL",
+            "type": "SUBSIDY",
+            "amount": 411.0
+          }
+        ],
+        "buyerType": "PERSON",
+        "currency": "RUR"
+      },
+      {
+        "id": 59981963074,
+        "creationDate": "2026-08-06",
+        "statusUpdateDate": "2026-08-09T21:38:57.285+03:00",
+        "status": "DELIVERED",
+        "partnerOrderId": "59981963074",
+        "paymentType": "PREPAID",
+        "fake": false,
+        "deliveryRegion": {
+          "id": 213,
+          "name": "Москва"
+        },
+        "items": [
+          {
+            "offerName": "чай травки для разных моментов / для бодрости / для спокойствия / для удовольствия / имбирь и лимон / для красоты",
+            "marketSku": 103279757607,
+            "shopSku": "travki-assorti",
+            "count": 1,
+            "prices": [
+              {
+                "type": "MARKETPLACE",
+                "costPerItem": 343.0,
+                "total": 343.0
+              },
+              {
+                "type": "BUYER",
+                "costPerItem": 450.0,
+                "total": 450.0
+              }
+            ],
+            "warehouse": {
+              "id": 1371280,
+              "name": "Братиславская"
+            },
+            "bidFee": 176
+          },
+          {
+            "offerName": "чай травки для спокойствия, травяной, без ароматизаторов, 22 пакетика",
+            "marketSku": 101699351216,
+            "shopSku": "4620028263209",
+            "count": 1,
+            "prices": [
+              {
+                "type": "MARKETPLACE",
+                "costPerItem": 344.0,
+                "total": 344.0
+              },
+              {
+                "type": "BUYER",
+                "costPerItem": 462.0,
+                "total": 462.0
+              }
+            ],
+            "warehouse": {
+              "id": 1371280,
+              "name": "Братиславская"
+            },
+            "bidFee": 414
+          }
+        ],
+        "payments": [
+          {
+            "id": "1539922037",
+            "date": "2026-08-06",
+            "type": "PAYMENT",
+            "source": "BUYER",
+            "total": 450.0
+          },
+          {
+            "id": "1539922038",
+            "date": "2026-08-06",
+            "type": "PAYMENT",
+            "source": "BUYER",
+            "total": 462.0
+          }
+        ],
+        "commissions": [
+          {
+            "type": "FEE",
+            "actual": 5.61
+          },
+          {
+            "type": "CROSSREGIONAL_DELIVERY",
+            "actual": 2.0
+          },
+          {
+            "type": "PAYMENT_TRANSFER",
+            "actual": 25.59
+          },
+          {
+            "type": "AGENCY",
+            "actual": 0.24
+          },
+          {
+            "type": "AUCTION_PROMOTION",
+            "actual": 2.0
+          },
+          {
+            "type": "DELIVERY_TO_CUSTOMER",
+            "actual": 79.95
+          }
+        ],
+        "subsidies": [
+          {
+            "operationType": "ACCRUAL",
+            "type": "SUBSIDY",
+            "amount": 343.0
+          },
+          {
+            "operationType": "ACCRUAL",
+            "type": "SUBSIDY",
+            "amount": 344.0
+          }
+        ],
+        "buyerType": "PERSON",
+        "currency": "RUR"
+      },
+      {
+        "id": 59981948289,
+        "creationDate": "2026-08-06",
+        "statusUpdateDate": "2026-08-11T15:23:37.895+03:00",
+        "status": "DELIVERED",
+        "partnerOrderId": "59981948289",
+        "paymentType": "PREPAID",
+        "fake": false,
+        "deliveryRegion": {
+          "id": 219,
+          "name": "Черноголовка"
+        },
+        "items": [
+          {
+            "offerName": "Чай Травки \"Чтобы лето не кончалось\", травяной, в пакетиках, без ароматизаторов",
+            "marketSku": 103295446610,
+            "shopSku": "travki_chln",
+            "count": 1,
+            "prices": [
+              {
+                "type": "MARKETPLACE",
+                "costPerItem": 340.0,
+                "total": 340.0
+              },
+              {
+                "type": "BUYER",
+                "costPerItem": 466.0,
+                "total": 466.0
+              }
+            ],
+            "warehouse": {
+              "id": 1371280,
+              "name": "Братиславская"
+            },
+            "bidFee": 173
+          }
+        ],
+        "payments": [
+          {
+            "id": "1539920224",
+            "date": "2026-08-06",
+            "type": "PAYMENT",
+            "source": "BUYER",
+            "total": 466.0
+          }
+        ],
+        "commissions": [
+          {
+            "type": "PAYMENT_TRANSFER",
+            "actual": 12.9
+          },
+          {
+            "type": "DELIVERY_TO_CUSTOMER",
+            "actual": 40.3
+          },
+          {
+            "type": "AGENCY",
+            "actual": 0.12
+          },
+          {
+            "type": "AUCTION_PROMOTION",
+            "actual": 1.0
+          },
+          {
+            "type": "FEE",
+            "actual": 2.83
+          },
+          {
+            "type": "CROSSREGIONAL_DELIVERY",
+            "actual": 1.0
+          }
+        ],
+        "subsidies": [
+          {
+            "operationType": "ACCRUAL",
+            "type": "SUBSIDY",
+            "amount": 340.0
+          }
+        ],
+        "buyerType": "PERSON",
+        "currency": "RUR"
+      }
+    ]
+  },
+  "stocks": {
+    "error": true,
+    "status_code": 404,
+    "message": "Client error '404 Not Found' for url 'https://api.partner.market.yandex.ru/v2/businesses/5975487/offers/stocks'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+    "response": "{\"errors\":[{\"code\":\"NOT_FOUND\",\"message\":\"Resource not found\"}],\"status\":\"ERROR\"}"
+  },
+  "prices": {
+    "count": 37,
+    "sample": [
+      {
+        "offer": {
+          "offerId": "12345-55",
+          "name": "Дегустационный набор ТРАВКИ, 5 вкусов / для бодрости/ для спокойствия / для детокса / имбирь и лимон / для легкости",
+          "pictures": [
+            "https://avatars.mds.yandex.net/get-marketpic/13300118/picd4ac0da1be917587f7ad71410442360e/orig",
+            "https://avatars.mds.yandex.net/get-marketpic/11916949/pic7b41159311e379986ab1155f87a582d3/orig",
+            "https://avatars.mds.yandex.net/get-marketpic/11916949/picbfb606c5c10abc71cddba1c681a35a2f/orig",
+            "https://avatars.mds.yandex.net/get-marketpic/11475820/pic8e894ec6d520f17254186b78efa82d03/orig",
+            "https://avatars.mds.yandex.net/get-marketpic/11935957/picb86933f9612322159b4a72484f8942ad/orig",
+            "https://avatars.mds.yandex.net/get-marketpic/13256569/pic14337891a8997c8a42be46167c2bc793/orig"
+          ],
+          "videos": [
+            "https://v.ozone.ru/vod/video-11/01GYJ1ATRY749Y2Y24VQB6RKT5/asset_2_h264.mp4"
+          ],
+          "vendor": "ТРАВКИ",
+          "barcodes": [
+            "OZN612048339"
+          ],
+          "description": "Дегустационный набор \"ТРАВКИ\" - это уникальное сочетание пяти различных вкусов, каждый из которых создан для удовлетворения ваших потребностей.<br/><br/>Набор включает в себя пять видов чая: ТРАВКИ для бодрости, ТРАВКИ для легкости, ТРАВКИ для спокойствия, ТРАВКИ имбирь и лимон, ТРАВКИ для детокса. Каждый из них обладает своим уникальным вкусом и ароматом, который поможет вам справиться с различными ситуациями.<br/><br/>Все чаи в наборе являются травяными, что делает их не только вкусными, но и полезными для здоровья. В составе нет ГМО, искусственных ароматизаторов, глютена и сахара, что делает его безопасным для ежедневного употребления.<br/><br/>Чай представлен в пакетиках, что делает его удобным для использования в любое время и в любом месте. Материал упаковки - картон, что гарантирует сохранность продукта.<br/><br/>Дегустационный набор \"ТРАВКИ\" - это отличный выбор для тех, кто ценит качество, вкус и пользу.",
+          "manufacturerCountries": [
+            "Россия"
+          ],
+          "weightDimensions": {
+            "length": 25,
+            "width": 15,
+            "height": 15,
+            "weight": 0.51
+          },
+          "vendorCode": "123456-55",
+          "shelfLife": {
+            "timePeriod": 730,
+            "timeUnit": "DAY"
+          },
+          "customsCommodityCode": "2106909808",
+          "commodityCodes": [
+            {
+              "code": "2106909808",
+              "type": "CUSTOMS_COMMODITY_CODE"
+            }
+          ],
+          "downloadable": false,
+          "adult": false,
+          "params": [
+            {
+              "name": "Бренд",
+              "value": "ТРАВКИ"
+            },
+            {
+              "name": "Тип",
+              "value": "Чай в пакетиках"
+            },
+            {
+              "name": "Название модели (для объединения в одну карточку)",
+              "value": "травяной чай"
+            },
+            {
+              "name": "Название",
+              "value": "Дегустационный набор ТРАВКИ"
+            },
+            {
+              "name": "Название",
+              "value": "5 вкусов"
+            },
+            {
+              "name": "Аннотация",
+              "value": "Без ароматизаторов"
+            },
+            {
+              "name": "Аннотация",
+              "value": "подсластителей и красителей. Не содержит кофеин.Не является лекарственным средством. Противопоказаний нет"
+            },
+            {
+              "name": "Аннотация",
+              "value": "кроме индивидуальной непереносимости. Перед употреблением во время беременности и лактации"
+            },
+            {
+              "name": "Аннотация",
+              "value": "пожалуйста"
+            },
+            {
+              "name": "Аннотация",
+              "value": "проконсультируйтесь с врачом."
+            },
+            {
+              "name": "Единиц в одном товаре",
+              "value": "5"
+            },
+            {
+              "name": "Вид чая",
+              "value": "Травяной"
+            },
+            {
+              "name": "Вид чая",
+              "value": "Цветочный"
+            },
+            {
+              "name": "Вид чая",
+              "value": "Ягодный"
+            },
+            {
+              "name": "Ключевые слова",
+              "value": "травяной чай"
+            },
+            {
+              "name": "Ключевые слова",
+              "value": "чай Травки"
+            },
+            {
+              "name": "Ключевые слова",
+              "value": "чай в пакетиках"
+            },
+            {
+              "name": "Ключевые слова",
+              "value": "травяной чай в пакетиках"
+            },
+            {
+              "name": "Ключевые слова",
+              "value": "травки"
+            },
+            {
+              "name": "Число пакетиков",
+              "value": "110"
+            },
+            {
+              "name": "Минимальная температура",
+              "value": "17"
+            },
+            {
+              "name": "Максимальная температура",
+              "value": "24"
+            },
+            {
+              "name": "Не содержит",
+              "value": "Без ГМО"
+            },
+            {
+              "name": "Не содержит",
+              "value": "Без ароматизаторов"
+            },
+            {
+              "name": "Не содержит",
+              "value": "Без глютена"
+            },
+            {
+              "name": "Не содержит",
+              "value": "Без сахара"
+            },
+            {
+              "name": "Особенности напитков, продуктов питания",
+              "value": "Вегетарианский продукт"
+            },
+            {
+              "name": "Особенности напитков, продуктов питания",
+              "value": "Диетический продукт"
+            },
+            {
+              "name": "Особенности напитков, продуктов питания",
+              "value": "Натуральный продукт"
+            },
+            {
+              "name": "Особенности напитков, продуктов питания",
+              "value": "Постный продукт"
+            },
+            {
+              "name": "Энергетическая ценность, ккал/100 г",
+              "value": "0"
+            },
+            {
+              "name": "Страна-изготовитель",
+              "value": "Россия"
+            },
+            {
+              "name": "Белки, г/100 г",
+              "value": "0"
+            },
+            {
+              "name": "Жиры, г/100 г",
+              "value": "0"
+            },
+            {
+              "name": "Углеводы, г/100 г",
+              "value": "0"
+            },
+            {
+              "name": "Срок годности в днях",
+              "value": "730"
+            },
+            {
+              "name": "Вес товара, г",
+              "value": "200"
+            },
+            {
+              "name": "Условия хранения",
+              "value": "При относительной влажности не более 70% и отдельно от остропахнущих продуктов."
+            },
+            {
+              "name": "Упаковка",
+              "value": "Картонная коробка"
+            },
+            {
+              "name": "Состав",
+              "value": "В этот набор входят пять вкусов Травок на разные случаи жизни.\n\nТРАВКИ для бодрости — для продуктивного дня"
+            },
+            {
+              "name": "Состав",
+              "value": "ТРАВКИ для легкости — для улучшения пищеварения"
+            },
+            {
+              "name": "Состав",
+              "value": "ТРАВКИ для спокойствия — чтобы расслабиться"
+            },
+            {
+              "name": "Состав",
+              "value": "ТРАВКИ имбирь и лимон — чтобы согреться"
+            },
+            {
+              "name": "Состав",
+              "value": "ТРАВКИ для детокса — для супер-формы."
+            },
+            {
+              "name": "Количество заводских упаковок",
+              "value": "1"
+            },
+            {
+              "name": "Категория ограничения",
+              "value": "safe"
+            },
+            {
+              "name": "Подарочный набор",
+              "value": "Да"
+            },
+            {
+              "name": "Артикул",
+              "value": "123456"
+            },
+            {
+              "name": "В подарок",
+              "value": "Набор"
+            },
+            {
+              "name": "В подарок",
+              "value": "Коллекция"
+            },
+            {
+              "name": "Событие для подарка",
+              "value": "На день рождения"
+            },
+            {
+              "name": "Событие для подарка",
+              "value": "Родным и друзьям"
+            },
+            {
+              "name": "Событие для подарка",
+              "value": "Руководителю"
+            },
+            {
+              "name": "Событие для подарка",
+              "value": "Сотрудникам"
+            },
+            {
+              "name": "Название вкуса",
+              "value": "5 вкусов"
+            },
+            {
+              "name": "Пол ребенка",
+              "value": "Унисекс"
+            },
+            {
+              "name": "ТН ВЭД коды ЕАЭС",
+              "value": "0902300001 - Чай черный(ферментированный) и частично ферментированный"
+            },
+            {
+              "name": "ТН ВЭД коды ЕАЭС",
+              "value": "в первичных упаковках нетто-массой не более 3-х кг в одноразовой упаковке"
+            }
+          ],
+          "basicPrice": {
+            "value": 2350.0,
+            "currencyId": "RUR",
+            "discountBase": 2590.0,
+            "updatedAt": "2026-07-21T17:06:55+03:00"
+          },
+          "cardStatus": "HAS_CARD_CAN_UPDATE",
+          "campaigns": [
+            {
+              "campaignId": 90279888,
+              "status": "NO_STOCKS"
+            },
+            {
+              "campaignId": 23594730,
+              "status": "DISABLED_AUTOMATICALLY"
+            },
+            {
+              "campaignId": 35125865,
+              "status": "NO_STOCKS"
+            }
+          ],
+          "mediaFiles": {
+            "videos": [
+              {
+                "url": "https://v.ozone.ru/vod/video-11/01GYJ1ATRY749Y2Y24VQB6RKT5/asset_2_h264.mp4",
+                "uploadState": "UPLOADED"
+              }
+            ],
+            "pictures": [
+              {
+                "url": "https://avatars.mds.yandex.net/get-marketpic/13300118/picd4ac0da1be917587f7ad71410442360e/orig",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://avatars.mds.yandex.net/get-marketpic/11916949/pic7b41159311e379986ab1155f87a582d3/orig",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://avatars.mds.yandex.net/get-marketpic/11916949/picbfb606c5c10abc71cddba1c681a35a2f/orig",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://avatars.mds.yandex.net/get-marketpic/11475820/pic8e894ec6d520f17254186b78efa82d03/orig",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://avatars.mds.yandex.net/get-marketpic/11935957/picb86933f9612322159b4a72484f8942ad/orig",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://avatars.mds.yandex.net/get-marketpic/13256569/pic14337891a8997c8a42be46167c2bc793/orig",
+                "uploadState": "UPLOADED"
+              }
+            ]
+          },
+          "ugc": {
+            "rating": 5.0
+          }
+        },
+        "mapping": {
+          "marketSku": 102817790015,
+          "marketSkuName": "Дегустационный набор травки, 5 вкусов / для бодрости/ для спокойствия / для детокса / имбирь и лимон / для легкости",
+          "marketModelId": 74244628,
+          "marketModelName": "Дегустационный набор травки, 5 вкусов",
+          "marketCategoryId": 61516298,
+          "marketCategoryName": "Чаи листовые"
+        },
+        "showcaseUrls": [
+          {
+            "showcaseType": "B2C",
+            "showcaseUrl": "https://market.yandex.ru/card/slug/102817790015?businessId=5975487"
+          },
+          {
+            "showcaseType": "B2B",
+            "showcaseUrl": "https://business.market.yandex.ru/card/slug/102817790015?businessId=5975487"
+          }
+        ]
+      },
+      {
+        "offer": {
+          "offerId": "4620028263186",
+          "name": "чай ТРАВКИ для бодрости, травяной, без ароматизатоов, 22 пакетика",
+          "category": "Чай в пакетиках",
+          "pictures": [
+            "https://avatars.mds.yandex.net/get-marketpic/9313929/pic6c54b682bb8a63840d20217a33463290/orig",
+            "https://cdn1.ozone.ru/s3/multimedia-j/6626421667.jpg",
+            "https://cdn1.ozone.ru/s3/multimedia-l/6626421669.jpg",
+            "https://cdn1.ozone.ru/s3/multimedia-g/6626421664.jpg",
+            "https://cdn1.ozone.ru/s3/multimedia-k/6626421668.jpg"
+          ],
+          "videos": [
+            "https://v.ozone.ru/vod/video-11/01GYJ1ATRY749Y2Y24VQB6RKT5/asset_2_h264.mp4"
+          ],
+          "vendor": "ТРАВКИ",
+          "barcodes": [
+            "4620028263186"
+          ],
+          "description": "Для продуктивного дня и когда нужны силы.<br/><br/>Чай из трав и ягод для энергичного начала дня и ясности мыслей. Терпкий вкус ферментированного иван-чая с кислинкой ягод лимонника и шиповника и ароматом саган-дайля.<br/><br/>Поможет: <br/><br/>– Проснуться <br/><br/>– Поднять настроение <br/><br/>– Сосредоточиться <br/><br/>– Настроиться на продуктивность <br/><br/>– Почувствовать прилив сил без кофе<br/><br/>Без ароматизаторов, подсластителей и красителей. Не содержит кофеин.Не является лекарственным средством. Противопоказаний нет, кроме индивидуальной непереносимости. Перед употреблением во время беременности и лактации, пожалуйста, проконсультируйтесь с врачом.",
+          "manufacturerCountries": [
+            "Россия"
+          ],
+          "weightDimensions": {
+            "length": 15.1,
+            "width": 7.8,
+            "height": 6.9,
+            "weight": 0.04
+          },
+          "vendorCode": "4620028263186",
+          "shelfLife": {
+            "timePeriod": 730,
+            "timeUnit": "DAY"
+          },
+          "downloadable": false,
+          "adult": false,
+          "params": [
+            {
+              "name": "Бренд",
+              "value": "ТРАВКИ"
+            },
+            {
+              "name": "Тип",
+              "value": "Чай в пакетиках"
+            },
+            {
+              "name": "Название модели (для объединения в одну карточку)",
+              "value": "травяной чай_Для бодрости"
+            },
+            {
+              "name": "Название",
+              "value": "чай ТРАВКИ для бодрости"
+            },
+            {
+              "name": "Вид чая",
+              "value": "Травяной"
+            },
+            {
+              "name": "Единиц в одном товаре",
+              "value": "1"
+            },
+            {
+              "name": "Аннотация",
+              "value": "Для продуктивного дня и когда нужны силы.<br/><br/>Чай из трав и ягод для энергичного начала дня и ясности мыслей. Терпкий вкус ферментированного иван-чая с кислинкой ягод лимонника и шиповника и ароматом саган-дайля.<br/><br/>Поможет: <br/><br/>– Проснуться <br/><br/>– Поднять настроение <br/><br/>– Сосредоточиться <br/><br/>– Настроиться на продуктивность <br/><br/>– Почувствовать прилив сил без кофе<br/><br/>Без ароматизаторов, подсластителей и красителей. Не содержит кофеин.Не является лекарственным средством. Противопоказаний нет, кроме индивидуальной непереносимости. Перед употреблением во время беременности и лактации, пожалуйста, проконсультируйтесь с врачом."
+            },
+            {
+              "name": "Число пакетиков",
+              "value": "22"
+            },
+            {
+              "name": "Ключевые слова",
+              "value": "травяной чай, травки, чай травки, травяной чай в пакетиках"
+            },
+            {
+              "name": "Минимальная температура",
+              "value": "5"
+            },
+            {
+              "name": "Максимальная температура",
+              "value": "20"
+            },
+            {
+              "name": "Не содержит",
+              "value": "без ароматизаторов"
+            },
+            {
+              "name": "Не содержит",
+              "value": "без глютена"
+            },
+            {
+              "name": "Не содержит",
+              "value": "без сахара"
+            },
+            {
+              "name": "Не содержит",
+              "value": "без ГМО"
+            },
+            {
+              "name": "Страна-изготовитель",
+              "value": "Россия"
+            },
+            {
+              "name": "Энергетическая ценность, ккал/100 г",
+              "value": "0"
+            },
+            {
+              "name": "Белки, г/100 г",
+              "value": "0"
+            },
+            {
+              "name": "Жиры, г/100 г",
+              "value": "0"
+            },
+            {
+              "name": "Углеводы, г/100 г",
+              "value": "0"
+            },
+            {
+              "name": "Срок годности в днях",
+              "value": "730"
+            },
+            {
+              "name": "Вес товара, г",
+              "value": "40"
+            },
+            {
+              "name": "Условия хранения",
+              "value": "При относительной влажности не более 70% и отдельно от остропахнущих продуктов."
+            },
+            {
+              "name": "Упаковка",
+              "value": "Картонная коробка"
+            },
+            {
+              "name": "Состав",
+              "value": "Ферментированный иван-чай, листья гинкго билоба, ягоды лимонника, плоды шиповника, зверобой, саган-дайля."
+            },
+            {
+              "name": "Количество заводских упаковок",
+              "value": "1"
+            },
+            {
+              "name": "Название вкуса",
+              "value": "Для бодрости"
+            },
+            {
+              "name": "Использовать шаблонизатор наименований",
+              "value": "true"
+            },
+            {
+              "name": "Артикул",
+              "value": "4620028263186"
+            },
+            {
+              "name": "Пол ребенка",
+              "value": "Унисекс"
+            },
+            {
+              "name": "Подарочный набор",
+              "value": "Да"
+            },
+            {
+              "name": "Категория ограничения",
+              "value": "safe"
+            },
+            {
+              "name": "ТН ВЭД коды ЕАЭС",
+              "value": "0902300001 - Чай черный(ферментированный) и частично ферментированный,в первичных упаковках нетто-массой не более 3-х кг в одноразовой упаковке"
+            }
+          ],
+          "basicPrice": {
+            "value": 1050.0,
+            "currencyId": "RUR",
+            "discountBase": 1150.0,
+            "updatedAt": "2026-07-21T17:06:55+03:00"
+          },
+          "cardStatus": "HAS_CARD_CAN_UPDATE",
+          "campaigns": [
+            {
+              "campaignId": 90279888,
+              "status": "PUBLISHED"
+            },
+            {
+              "campaignId": 23594730,
+              "status": "DISABLED_AUTOMATICALLY"
+            },
+            {
+              "campaignId": 35125865,
+              "status": "NO_STOCKS"
+            }
+          ],
+          "mediaFiles": {
+            "videos": [
+              {
+                "url": "https://v.ozone.ru/vod/video-11/01GYJ1ATRY749Y2Y24VQB6RKT5/asset_2_h264.mp4",
+                "uploadState": "UPLOADED"
+              }
+            ],
+            "pictures": [
+              {
+                "url": "https://avatars.mds.yandex.net/get-marketpic/9313929/pic6c54b682bb8a63840d20217a33463290/orig",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-j/6626421667.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-l/6626421669.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-g/6626421664.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-k/6626421668.jpg",
+                "uploadState": "UPLOADED"
+              }
+            ]
+          },
+          "groupId": "травяной чай_Для бодрости",
+          "ugc": {
+            "rating": 4.7
+          }
+        },
+        "mapping": {
+          "marketSku": 101357548466,
+          "marketSkuName": "Чай травяной Травки для бодрости пакетированный, 40 г, 22 шт., 1 уп.",
+          "marketModelId": 990724106,
+          "marketModelName": "Чай травяной Травки для бодрости пакетированный",
+          "marketCategoryId": 61520321,
+          "marketCategoryName": "Чаи пакетированные"
+        },
+        "showcaseUrls": [
+          {
+            "showcaseType": "B2C",
+            "showcaseUrl": "https://market.yandex.ru/card/slug/102193300559?businessId=5975487"
+          },
+          {
+            "showcaseType": "B2B",
+            "showcaseUrl": "https://business.market.yandex.ru/card/slug/102193300559?businessId=5975487"
+          }
+        ]
+      },
+      {
+        "offer": {
+          "offerId": "4620028263186-10",
+          "name": "чай травкой ТРАВКИ для бодрости / 10 упаковок по 22 пакетика",
+          "category": "Чай в пакетиках",
+          "pictures": [
+            "https://cdn1.ozone.ru/s3/multimedia-m/6694391614.jpg",
+            "https://cdn1.ozone.ru/s3/multimedia-2/6642594722.jpg",
+            "https://cdn1.ozone.ru/s3/multimedia-k/6626421668.jpg",
+            "https://cdn1.ozone.ru/s3/multimedia-g/6626421664.jpg",
+            "https://cdn1.ozone.ru/s3/multimedia-3/6642594723.jpg"
+          ],
+          "vendor": "ТРАВКИ",
+          "barcodes": [
+            "OZN1052886539"
+          ],
+          "description": "Чай \"Травки\" для бодрости: 10 упаковок по 22 пакетика<br/><br/>Для продуктивного дня и когда нужны силы<br/><br/>Чай \"Травки\" создан специально для тех, кто хочет начать свой день с энергией и ясностью мыслей. В его состав входят ферментированный иван-чай, ягоды лимонника, листья гинкго билоба, плоды шиповника, зверобой и веточки саган-дайля. Благодаря этому терпкому вкусу с кислинкой и аромату саган-дайля, вы сможете проснуться, поднять настроение, сосредоточиться и настроиться на продуктивность.<br/><br/>Состав и вкус<br/><br/>Состав чая \"Травки\" включает в себя ферментированный иван-чай, ягоды лимонника, листья гинкго билоба, плоды шиповника, зверобой и веточки саган-дайля. Это обеспечивает насыщенный и яркий вкус с нотками трав, шоколада, пряностей, шиповника, календулы, мелиссы, лимона и имбиря.<br/><br/>Упаковка и хранение<br/><br/>Чай \"Травки\" представлен в удобных и практичных картонных упаковках по 10 пакетиков. Вес одной упаковки составляет 400 грамм. Храните чай в чистых, сухих, не зараженных вредителями помещениях с относительной влажностью воздуха не более 75% и температурой воздуха не более 25°С.<br/><br/>Преимущества и особенности<br/><br/>Чай \"Травки\" не содержит кофеин, искусственные подсластители, красители и ароматизаторы, что делает его безопасным и полезным для здоровья.<br/><br/>Выбирая чай \"Травки\" для бодрости, вы получаете качественный и ароматный напиток, который поможет вам проснуться, настроиться на продуктивный день и почувствовать прилив сил без кофеина.",
+          "manufacturerCountries": [
+            "Россия"
+          ],
+          "weightDimensions": {
+            "length": 36,
+            "width": 16,
+            "height": 16,
+            "weight": 1
+          },
+          "vendorCode": "4620028263186-10",
+          "shelfLife": {
+            "timePeriod": 730,
+            "timeUnit": "DAY"
+          },
+          "customsCommodityCode": "2106909808",
+          "commodityCodes": [
+            {
+              "code": "2106909808",
+              "type": "CUSTOMS_COMMODITY_CODE"
+            }
+          ],
+          "params": [
+            {
+              "name": "Бренд",
+              "value": "ТРАВКИ"
+            },
+            {
+              "name": "Тип",
+              "value": "Чай в пакетиках"
+            },
+            {
+              "name": "Название модели (для объединения в одну карточку)",
+              "value": "травяной чай_Для бодрости"
+            },
+            {
+              "name": "Название",
+              "value": "чай ТРАВКИ для бодрости, 10 пачек"
+            },
+            {
+              "name": "Вид чая",
+              "value": "Травяной"
+            },
+            {
+              "name": "Единиц в одном товаре",
+              "value": "10"
+            },
+            {
+              "name": "Аннотация",
+              "value": "Для продуктивного дня и когда нужны силы.<br/><br/>Чай из трав и ягод для энергичного начала дня и ясности мыслей. Терпкий вкус ферментированного иван-чая с кислинкой ягод лимонника и шиповника и ароматом саган-дайля.<br/><br/>Поможет: – Проснуться – Поднять настроение – Сосредоточиться – Настроиться на продуктивность – Почувствовать прилив сил без кофе<br/><br/>Состав:ферментированный иван-чай, ягоды лимонника, листья гинкго билоба, плоды шиповника, зверобой, веточки саган-дайля."
+            },
+            {
+              "name": "Минимальная температура",
+              "value": "5"
+            },
+            {
+              "name": "Максимальная температура",
+              "value": "20"
+            },
+            {
+              "name": "Страна-изготовитель",
+              "value": "Россия"
+            },
+            {
+              "name": "Срок годности в днях",
+              "value": "730"
+            },
+            {
+              "name": "Вес товара, г",
+              "value": "400"
+            },
+            {
+              "name": "Условия хранения",
+              "value": "Хранить в чистых, сухих, не зараженных вредителями помещениях с относительной влажностью воздуха не более 75% и температурой воздуха не более 25°С."
+            },
+            {
+              "name": "Упаковка",
+              "value": "Картонная коробка"
+            },
+            {
+              "name": "Состав",
+              "value": "Ферментированный иван-чай, листья гинкго билоба, ягоды лимонника, плоды шиповника, зверобой, саган-дайля."
+            },
+            {
+              "name": "Количество заводских упаковок",
+              "value": "1"
+            },
+            {
+              "name": "Название вкуса",
+              "value": "Для бодрости"
+            },
+            {
+              "name": "Признак Меркурий",
+              "value": "Ручная проверка"
+            },
+            {
+              "name": "Артикул",
+              "value": "4620028263186-10"
+            },
+            {
+              "name": "Использовать шаблонизатор наименований",
+              "value": "true"
+            },
+            {
+              "name": "ТН ВЭД коды ЕАЭС",
+              "value": "2106909808 - Пищевые продукты, в другом месте не поименованные или не включенные, прочие"
+            },
+            {
+              "name": "Категория ограничения",
+              "value": "safe"
+            },
+            {
+              "name": "Пол ребенка",
+              "value": "Унисекс"
+            }
+          ],
+          "basicPrice": {
+            "value": 5290.0,
+            "currencyId": "RUR",
+            "discountBase": 6500.0,
+            "updatedAt": "2026-07-21T17:06:55+03:00"
+          },
+          "cardStatus": "HAS_CARD_CAN_UPDATE",
+          "campaigns": [
+            {
+              "campaignId": 90279888,
+              "status": "NO_STOCKS"
+            },
+            {
+              "campaignId": 23594730,
+              "status": "DISABLED_AUTOMATICALLY"
+            },
+            {
+              "campaignId": 35125865,
+              "status": "NO_STOCKS"
+            }
+          ],
+          "mediaFiles": {
+            "pictures": [
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-m/6694391614.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-2/6642594722.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-k/6626421668.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-g/6626421664.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-3/6642594723.jpg",
+                "uploadState": "UPLOADED"
+              }
+            ]
+          },
+          "groupId": "травяной чай_Для бодрости",
+          "ugc": {
+            "rating": 4.7
+          }
+        },
+        "mapping": {
+          "marketSku": 102672093977,
+          "marketSkuName": "Чай травкой ТРАВКИ для бодрости / 10 упаковок по 22 пакетика",
+          "marketModelId": 990724106,
+          "marketModelName": "Чай травяной Травки для бодрости пакетированный",
+          "marketCategoryId": 61520321,
+          "marketCategoryName": "Чаи пакетированные"
+        },
+        "showcaseUrls": [
+          {
+            "showcaseType": "B2C",
+            "showcaseUrl": "https://market.yandex.ru/card/slug/102811114754?businessId=5975487"
+          },
+          {
+            "showcaseType": "B2B",
+            "showcaseUrl": "https://business.market.yandex.ru/card/slug/102811114754?businessId=5975487"
+          }
+        ]
+      },
+      {
+        "offer": {
+          "offerId": "4620028263193",
+          "name": "чай ТРАВКИ для легкости, травяной, без ароматизаторов, 22 пакетика",
+          "category": "Чай в пакетиках",
+          "pictures": [
+            "https://avatars.mds.yandex.net/get-marketpic/1705046/pic7ab89674503764bedfda15b9ee13b319/orig",
+            "https://cdn1.ozone.ru/s3/multimedia-i/6630473754.jpg",
+            "https://cdn1.ozone.ru/s3/multimedia-z/6630473735.jpg",
+            "https://cdn1.ozone.ru/s3/multimedia-1/6630473737.jpg",
+            "https://cdn1.ozone.ru/s3/multimedia-7/6630470035.jpg",
+            "https://avatars.mds.yandex.net/get-mpic/1985106/img_id7727595145357078017.jpeg/orig",
+            "https://avatars.mds.yandex.net/get-mpic/1589815/img_id6642625630438131992.jpeg/orig"
+          ],
+          "videos": [
+            "https://v.ozone.ru/vod/video-11/01GYJ1ATRY749Y2Y24VQB6RKT5/asset_2_h264.mp4"
+          ],
+          "vendor": "ТРАВКИ",
+          "barcodes": [
+            "4620028263193"
+          ],
+          "description": "Травяной чай \"ТРАВКИ\" для легкости: без ароматизаторов, подсластителей и красителей.<br/><br/>Травяной чай \"ТРАВКИ\" представляет собой натуральный и полезный напиток, который поможет вам ощутить легкость и прилив сил. В его состав входят семена фенхеля, зиры и кориандра, листья садовой мяты и мелиссы, цветы ромашки, плоды боярышника, корень имбиря и кардамон. <br/><br/>Чай \"ТРАВКИ\" выпускается в удобных пакетиках, что позволяет быстро и легко приготовить напиток. Для этого достаточно залить пакетик водой, разогретой до 90 градусов, настоять чай 5-7 минут и наслаждаться его насыщенным вкусом и ароматом.<br/><br/>Особенностью этого чая является отсутствие искусственных ароматизаторов, подсластителей и глютена. Это делает его подходящим для людей, придерживающихся здорового образа жизни и следящих за своим питанием.<br/><br/><br/>Не является лекарственным средством. Противопоказаний нет, кроме индивидуальной непереносимости. Перед употреблением во время беременности и лактации, пожалуйста, проконсультируйтесь с врачом.",
+          "manufacturerCountries": [
+            "Россия"
+          ],
+          "weightDimensions": {
+            "length": 7,
+            "width": 8,
+            "height": 15,
+            "weight": 0.04
+          },
+          "vendorCode": "4620028263193",
+          "shelfLife": {
+            "timePeriod": 730,
+            "timeUnit": "DAY"
+          },
+          "downloadable": false,
+          "adult": false,
+          "params": [
+            {
+              "name": "Бренд",
+              "value": "ТРАВКИ"
+            },
+            {
+              "name": "Тип",
+              "value": "Чай в пакетиках"
+            },
+            {
+              "name": "Название модели (для объединения в одну карточку)",
+              "value": "травяной чай_Для легкости"
+            },
+            {
+              "name": "Название",
+              "value": "чай ТРАВКИ для легкости"
+            },
+            {
+              "name": "Единиц в одном товаре",
+              "value": "1"
+            },
+            {
+              "name": "Вид чая",
+              "value": "Травяной"
+            },
+            {
+              "name": "Аннотация",
+              "value": "Без ароматизаторов, подсластителей и красителей. Не содержит кофеин.Без ароматизаторов, подсластителей и красителей. Не содержит кофеин.\nНе является лекарственным средством. Противопоказаний нет, кроме индивидуальной непереносимости. Перед употреблением во время беременности и лактации, пожалуйста, проконсультируйтесь с врачом."
+            },
+            {
+              "name": "Число пакетиков",
+              "value": "22"
+            },
+            {
+              "name": "Ключевые слова",
+              "value": "чай травки, травяной чай, чай в пакетиках, травяной чай в пакетиках"
+            },
+            {
+              "name": "Минимальная температура",
+              "value": "5"
+            },
+            {
+              "name": "Максимальная температура",
+              "value": "20"
+            },
+            {
+              "name": "Не содержит",
+              "value": "без ароматизаторов"
+            },
+            {
+              "name": "Не содержит",
+              "value": "без сахара"
+            },
+            {
+              "name": "Не содержит",
+              "value": "без глютена"
+            },
+            {
+              "name": "Не содержит",
+              "value": "без искусственных добавок"
+            },
+            {
+              "name": "Страна-изготовитель",
+              "value": "Россия"
+            },
+            {
+              "name": "Энергетическая ценность, ккал/100 г",
+              "value": "0"
+            },
+            {
+              "name": "Белки, г/100 г",
+              "value": "0"
+            },
+            {
+              "name": "Жиры, г/100 г",
+              "value": "0"
+            },
+            {
+              "name": "Углеводы, г/100 г",
+              "value": "0"
+            },
+            {
+              "name": "Срок годности в днях",
+              "value": "730"
+            },
+            {
+              "name": "Вес товара, г",
+              "value": "40"
+            },
+            {
+              "name": "Условия хранения",
+              "value": "при относительной влажности не более 70% и отдельно от остропахнущих продуктов"
+            },
+            {
+              "name": "Упаковка",
+              "value": "Картонная коробка"
+            },
+            {
+              "name": "Состав",
+              "value": "Фенхель, мята садовая, ромашка, зира, кориандр, мелисса, имбирь, боярышник, кардамон"
+            },
+            {
+              "name": "Количество заводских упаковок",
+              "value": "1"
+            },
+            {
+              "name": "Пол ребенка",
+              "value": "Унисекс"
+            },
+            {
+              "name": "Категория ограничения",
+              "value": "safe"
+            },
+            {
+              "name": "Использовать шаблонизатор наименований",
+              "value": "true"
+            },
+            {
+              "name": "Артикул",
+              "value": "4620028263193"
+            },
+            {
+              "name": "Название вкуса",
+              "value": "Для легкости"
+            },
+            {
+              "name": "ТН ВЭД коды ЕАЭС",
+              "value": "0902300001 - Чай черный(ферментированный) и частично ферментированный,в первичных упаковках нетто-массой не более 3-х кг в одноразовой упаковке"
+            }
+          ],
+          "basicPrice": {
+            "value": 1050.0,
+            "currencyId": "RUR",
+            "discountBase": 1150.0,
+            "updatedAt": "2026-07-21T17:06:55+03:00"
+          },
+          "cardStatus": "HAS_CARD_CAN_UPDATE",
+          "campaigns": [
+            {
+              "campaignId": 90279888,
+              "status": "PUBLISHED"
+            },
+            {
+              "campaignId": 23594730,
+              "status": "DISABLED_AUTOMATICALLY"
+            },
+            {
+              "campaignId": 35125865,
+              "status": "NO_STOCKS"
+            }
+          ],
+          "mediaFiles": {
+            "videos": [
+              {
+                "url": "https://v.ozone.ru/vod/video-11/01GYJ1ATRY749Y2Y24VQB6RKT5/asset_2_h264.mp4",
+                "uploadState": "UPLOADED"
+              }
+            ],
+            "pictures": [
+              {
+                "url": "https://avatars.mds.yandex.net/get-marketpic/1705046/pic7ab89674503764bedfda15b9ee13b319/orig",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-i/6630473754.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-z/6630473735.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-1/6630473737.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-7/6630470035.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://avatars.mds.yandex.net/get-mpic/1985106/img_id7727595145357078017.jpeg/orig",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://avatars.mds.yandex.net/get-mpic/1589815/img_id6642625630438131992.jpeg/orig",
+                "uploadState": "UPLOADED"
+              }
+            ]
+          },
+          "groupId": "травяной чай_Для легкости",
+          "ugc": {
+            "rating": 4.8
+          }
+        },
+        "mapping": {
+          "marketSku": 103820289728,
+          "marketSkuName": "Травки Травяной чай для легкости 22*1,75 гр",
+          "marketModelId": 5742273384,
+          "marketModelName": "Чай травяной Травки для бодрости пакетированный",
+          "marketCategoryId": 61520321,
+          "marketCategoryName": "Чаи пакетированные"
+        },
+        "showcaseUrls": [
+          {
+            "showcaseType": "B2C",
+            "showcaseUrl": "https://market.yandex.ru/card/slug/102172791111?businessId=5975487"
+          },
+          {
+            "showcaseType": "B2B",
+            "showcaseUrl": "https://business.market.yandex.ru/card/slug/102172791111?businessId=5975487"
+          }
+        ]
+      },
+      {
+        "offer": {
+          "offerId": "4620028263193-10",
+          "name": "чай травяной ТРАВКИ для легкости / 10 упаковок по 22 пакетика",
+          "category": "Соки, воды, напитки",
+          "pictures": [
+            "https://cdn1.ozone.ru/s3/multimedia-q/6694391258.jpg",
+            "https://cdn1.ozone.ru/s3/multimedia-i/6630473754.jpg",
+            "https://avatars.mds.yandex.net/get-marketpic/11871287/pice20dc3a8ae0bb50151f1c8673077f44f/orig",
+            "https://cdn1.ozone.ru/s3/multimedia-7/6630470035.jpg",
+            "https://cdn1.ozone.ru/s3/multimedia-1/6630473737.jpg"
+          ],
+          "vendor": "ТРАВКИ",
+          "barcodes": [
+            "OZN1052890250"
+          ],
+          "description": "Травяной чай \"ТРАВКИ\" для легкости: наслаждайтесь натуральным вкусом и пользой для здоровья.<br/><br/>Травяной чай \"ТРАВКИ\" без ароматизаторов, подсластителей и красителей.<br/><br/>Чай \"ТРАВКИ\" состоит из 10 различных трав, таких как фенхель, мята садовая, ромашка, зира, кориандр, мелисса, имбирь, боярышник и кардамон. Благодаря этому сочетанию, чай обладает приятным вкусом и полезными свойствами.<br/><br/>Чай \"ТРАВКИ\" не содержит кофеина, что делает его отличным выбором для тех, кто ищет чай без кофеина.<br/><br/>Перед употреблением травяного чая \"ТРАВКИ\" во время беременности и лактации рекомендуется проконсультироваться с врачом.<br/><br/>Чай \"ТРАВКИ\" упакован в картонные коробки по 22 пакетика в каждой. Это удобно для хранения и использования, а также позволяет наслаждаться чаем в любое время и в любом месте.<br/><br/>Храните чай \"ТРАВКИ\" в чистых, сухих, не зараженных вредителями помещениях с относительной влажностью воздуха не более 75% и температурой воздуха не более 25°С.<br/><br/>Выбирая травяной чай \"ТРАВКИ\", вы получаете натуральный, полезный и вкусный напиток, который поможет вам оставаться здоровыми и полными энергии.",
+          "manufacturerCountries": [
+            "Россия"
+          ],
+          "weightDimensions": {
+            "length": 36,
+            "width": 16,
+            "height": 16,
+            "weight": 1
+          },
+          "vendorCode": "4620028263193-10",
+          "shelfLife": {
+            "timePeriod": 730,
+            "timeUnit": "DAY"
+          },
+          "params": [
+            {
+              "name": "Бренд",
+              "value": "ТРАВКИ"
+            },
+            {
+              "name": "Тип",
+              "value": "Чай в пакетиках"
+            },
+            {
+              "name": "Название модели (для объединения в одну карточку)",
+              "value": "травяной чай"
+            },
+            {
+              "name": "Название",
+              "value": "чай ТРАВКИ для легкости, 10 пачек"
+            },
+            {
+              "name": "Единиц в одном товаре",
+              "value": "10"
+            },
+            {
+              "name": "Аннотация",
+              "value": "Без ароматизаторов, подсластителей и красителей. Не содержит кофеин.Без ароматизаторов, подсластителей и красителей. Не содержит кофеин.Не является лекарственным средством. Противопоказаний нет, кроме индивидуальной непереносимости. Перед употреблением во время беременности и лактации, пожалуйста, проконсультируйтесь с врачом."
+            },
+            {
+              "name": "Число пакетиков",
+              "value": "220"
+            },
+            {
+              "name": "Минимальная температура",
+              "value": "5"
+            },
+            {
+              "name": "Максимальная температура",
+              "value": "20"
+            },
+            {
+              "name": "Срок годности в днях",
+              "value": "730"
+            },
+            {
+              "name": "Условия хранения",
+              "value": "Хранить в чистых, сухих, не зараженных вредителями помещениях с относительной влажностью воздуха не более 75% и температурой воздуха не более 25°С."
+            },
+            {
+              "name": "Упаковка",
+              "value": "Картонная коробка"
+            },
+            {
+              "name": "Состав",
+              "value": "Фенхель, мята садовая, ромашка, зира, кориандр, мелисса, имбирь, боярышник, кардамон"
+            },
+            {
+              "name": "Количество заводских упаковок",
+              "value": "1"
+            },
+            {
+              "name": "Пол ребенка",
+              "value": "Унисекс"
+            },
+            {
+              "name": "Название вкуса",
+              "value": "Для легкости"
+            },
+            {
+              "name": "Категория ограничения",
+              "value": "safe"
+            },
+            {
+              "name": "Артикул",
+              "value": "4620028263193-10"
+            }
+          ],
+          "basicPrice": {
+            "value": 4900.0,
+            "currencyId": "RUR",
+            "discountBase": 6500.0,
+            "updatedAt": "2026-07-21T17:06:55+03:00"
+          },
+          "cardStatus": "HAS_CARD_CAN_UPDATE",
+          "campaigns": [
+            {
+              "campaignId": 90279888,
+              "status": "NO_STOCKS"
+            },
+            {
+              "campaignId": 23594730,
+              "status": "DISABLED_AUTOMATICALLY"
+            },
+            {
+              "campaignId": 35125865,
+              "status": "NO_STOCKS"
+            }
+          ],
+          "mediaFiles": {
+            "pictures": [
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-q/6694391258.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-i/6630473754.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://avatars.mds.yandex.net/get-marketpic/11871287/pice20dc3a8ae0bb50151f1c8673077f44f/orig",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-7/6630470035.jpg",
+                "uploadState": "UPLOADED"
+              },
+              {
+                "url": "https://cdn1.ozone.ru/s3/multimedia-1/6630473737.jpg",
+                "uploadState": "UPLOADED"
+              }
+            ]
+          }
+        },
+        "mapping": {
+          "marketSku": 102672025676,
+          "marketSkuName": "Чай травяной травки для легкости / 10 упаковок по 22 пакетика",
+          "marketModelId": 73607401,
+          "marketModelName": "Чай травки для легкости, 10 пачек",
+          "marketCategoryId": 61520321,
+          "marketCategoryName": "Чаи пакетированные"
+        },
+        "showcaseUrls": [
+          {
+            "showcaseType": "B2C",
+            "showcaseUrl": "https://market.yandex.ru/card/slug/102672025676?businessId=5975487"
+          },
+          {
+            "showcaseType": "B2B",
+            "showcaseUrl": "https://business.market.yandex.ru/card/slug/102672025676?businessId=5975487"
+          }
+        ]
+      }
+    ]
+  },
+  "bids": {
+    "count": 0,
+    "sample": []
+  },
+  "finance": {
+    "report_id": "6a717f5f-e120-477a-9ef9-6e40f64d8a18",
+    "status": "generating"
+  }
+}
