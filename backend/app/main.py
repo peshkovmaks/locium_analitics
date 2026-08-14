@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from app.routers import auth, catalog, dashboard, shops, products
 import os
 
 from app.database import engine, Base
@@ -62,18 +61,3 @@ async def startup():
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "version": "0.1.0"}
-
-
-@app.get("/")
-async def root():
-    """Serve the dashboard HTML."""
-    possible_paths = [
-        os.path.join(os.path.dirname(__file__), "static", "dashboard.html"),
-        os.path.join(os.path.dirname(__file__), "..", "..", "dashboard.html"),
-        "/app/dashboard.html",
-        "/dashboard.html",
-    ]
-    for path in possible_paths:
-        if os.path.exists(path):
-            return FileResponse(path)
-    return {"message": "API is running. Dashboard not found. Check /health"}

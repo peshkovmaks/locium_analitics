@@ -65,6 +65,10 @@ class ProductOut(BaseModel):
         from_attributes = True
 
 
+class ProductCostUpdate(BaseModel):
+    cost_price: float = Field(..., ge=0)
+
+
 # --- Shops ---
 class ShopCreate(BaseModel):
     marketplace: Marketplace
