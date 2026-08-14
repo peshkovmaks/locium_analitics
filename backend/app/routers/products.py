@@ -5,7 +5,7 @@ from typing import List
 from decimal import Decimal
 
 from app.database import get_db
-from app.models import Product, User
+from app.models import Product, User, Shop
 from app.schemas import ProductOut
 from app.auth import get_current_user
 
