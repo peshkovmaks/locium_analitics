@@ -75,8 +75,8 @@ class Product(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    sku = Column(String(100), nullable=False)  # ← канонический SKU
-    canonical_sku = Column(String(100), nullable=True)  # ← ДОБАВИТЬ
+    sku = Column(String(100), nullable=False)
+    canonical_sku = Column(String(100), nullable=True)
     name = Column(String(500), nullable=False)
     cost_price = Column(Numeric(12, 2), default=0)
     min_price = Column(Numeric(12, 2), default=0)
@@ -87,6 +87,9 @@ class Product(Base):
     user = relationship("User", back_populates="products")
     mappings = relationship(
         "ProductShopMapping", back_populates="product", cascade="all, delete-orphan"
+    )
+    shop_products = relationship(
+        "ShopProduct", back_populates="product", cascade="all, delete-orphan"
     )
 
 
