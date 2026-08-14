@@ -45,26 +45,41 @@ class SyncService:
         }
 
         try:
-            # 1. Sync sales
-            sales = await adapter.get_sales(date_from, date_to)
-            await self._save_sales(shop.id, sales)
-            await self._ensure_products(shop.id, sales)
-            results["sales"] = len(sales)
+            # 1. Sync sales — prefer real-time orders over delayed analytics
+            if hasattr(adapter, 'get_orders'):
+                orders = await adapter.get_orders(date_from, date_to)
+                await self._save_orders_as_sales(shop.id, orders)
+                await self._ensure_products(shop, orders)
+                results["sales"] = len(orders)
+            else:
+                sales = await adapter.get_sales(date_from, date_to)
+                await self._save_sales(shop.id, sales)
+                await self._ensure_products(shop, sales)
+                results["sales"] = len(sales)
 
             # 2. Sync stocks
-            stocks = await adapter.get_stocks()
-            await self._save_stocks(shop.id, stocks)
-            await self._ensure_products(shop.id, stocks)
-            results["stocks"] = len(stocks)
+            try:
+                stocks = await adapter.get_stocks()
+                await self._save_stocks(shop.id, stocks)
+                await self._ensure_products(shop, stocks)
+                results["stocks"] = len(stocks)
+            except Exception:
+                results["stocks"] = 0
 
             # 3. Sync adverts
-            adverts = await adapter.get_adverts(date_from, date_to)
-            await self._save_adverts(shop.id, adverts)
-            results["adverts"] = len(adverts)
+            try:
+                adverts = await adapter.get_adverts(date_from, date_to)
+                await self._save_adverts(shop.id, adverts)
+                results["adverts"] = len(adverts)
+            except Exception:
+                results["adverts"] = 0
 
             # 4. Sync prices
-            prices = await adapter.get_prices()
-            results["prices"] = len(prices)
+            try:
+                prices = await adapter.get_prices()
+                results["prices"] = len(prices)
+            except Exception:
+                results["prices"] = 0
 
             # 5. Finance report
             try:
@@ -85,67 +100,6 @@ class SyncService:
 
         return results
 
-        async def _ensure_products(self, shop_id, items):
-        """Create Product records for new SKUs with shop mappings."""
-        result = await self.db.execute(select(Shop).where(Shop.id == shop_id))
-        shop = result.scalar_one_or_none()
-        if not shop:
-            return
-
-        for item in items:
-            external_sku = item.get("external_sku")
-            name = item.get("name") or external_sku or "Unknown"
-            if not external_sku:
-                continue
-
-            # 1. Есть ли уже маппинг для этого магазина + внешнего SKU?
-            mapping_result = await self.db.execute(
-                select(ProductShopMapping).where(
-                    ProductShopMapping.shop_id == shop_id,
-                    ProductShopMapping.external_sku == external_sku,
-                )
-            )
-            mapping = mapping_result.scalar_one_or_none()
-
-            if mapping:
-                # Обновляем название товара, если изменилось
-                if mapping.product and mapping.product.name != name:
-                    mapping.product.name = name
-                continue
-
-            # 2. Есть ли уже Product с таким canonical_sku у этого пользователя?
-            #    (первый раз canonical_sku = external_sku от первой площадки)
-            product_result = await self.db.execute(
-                select(Product).where(
-                    Product.user_id == shop.user_id,
-                    Product.canonical_sku == external_sku,
-                )
-            )
-            product = product_result.scalar_one_or_none()
-
-            if not product:
-                # Создаём новый товар
-                product = Product(
-                    user_id=shop.user_id,
-                    sku=external_sku,               # канонический = первый внешний
-                    canonical_sku=external_sku,   # ← важно
-                    name=name,
-                    cost_price=Decimal(0),
-                    min_price=Decimal(0),
-                )
-                self.db.add(product)
-                await self.db.flush()  # чтобы product.id появился
-
-            # 3. Создаём маппинг
-            new_mapping = ProductShopMapping(
-                product_id=product.id,
-                shop_id=shop_id,
-                external_sku=external_sku,
-            )
-            self.db.add(new_mapping)
-
-        await self.db.commit()
-
     async def _save_sales(self, shop_id, sales: List[Dict[str, Any]]):
         for item in sales:
             sale = Sale(
@@ -165,7 +119,30 @@ class SyncService:
                 is_return=item.get("is_return", False),
             )
             self.db.add(sale)
-        await self.db.commit()
+
+    async def _save_orders_as_sales(self, shop_id, orders: List[Dict[str, Any]]):
+        """Convert real-time orders to sales format."""
+        for item in orders:
+            status = item.get("status", "").upper()
+            is_return = status in ("CANCELLED", "CANCELLED_BY_CUSTOMER", "RETURNED", "PARTIALLY_RETURNED")
+
+            sale = Sale(
+                shop_id=shop_id,
+                date=item["date"],
+                external_sku=item["external_sku"],
+                external_id=item.get("external_id"),
+                quantity=item["quantity"],
+                price=item["price"],
+                revenue=item["price"] * item["quantity"],
+                commission=Decimal(0),
+                logistics=Decimal(0),
+                storage=Decimal(0),
+                advertising=Decimal(0),
+                returns=Decimal(0),
+                other=Decimal(0),
+                is_return=is_return,
+            )
+            self.db.add(sale)
 
     async def _save_stocks(self, shop_id, stocks: List[Dict[str, Any]]):
         for item in stocks:
@@ -179,7 +156,6 @@ class SyncService:
                 in_way=item.get("in_way", 0),
             )
             self.db.add(stock)
-        await self.db.commit()
 
     async def _save_adverts(self, shop_id, adverts: List[Dict[str, Any]]):
         for item in adverts:
@@ -197,7 +173,57 @@ class SyncService:
                 cr=item.get("cr", Decimal(0)),
             )
             self.db.add(advert)
-        await self.db.commit()
+
+    async def _ensure_products(self, shop: Shop, items):
+        """Create Product records for new SKUs with shop mappings."""
+        for item in items:
+            external_sku = item.get("external_sku")
+            name = item.get("name") or external_sku or "Unknown"
+            if not external_sku:
+                continue
+
+            # 1. Check existing mapping
+            mapping_result = await self.db.execute(
+                select(ProductShopMapping).where(
+                    ProductShopMapping.shop_id == shop.id,
+                    ProductShopMapping.external_sku == external_sku,
+                )
+            )
+            mapping = mapping_result.scalar_one_or_none()
+
+            if mapping:
+                if mapping.product and mapping.product.name != name:
+                    mapping.product.name = name
+                continue
+
+            # 2. Check existing product by canonical_sku or sku
+            product_result = await self.db.execute(
+                select(Product).where(
+                    Product.user_id == shop.user_id,
+                    (Product.canonical_sku == external_sku) | (Product.sku == external_sku),
+                )
+            )
+            product = product_result.scalar_one_or_none()
+
+            if not product:
+                product = Product(
+                    user_id=shop.user_id,
+                    sku=external_sku,
+                    canonical_sku=external_sku,
+                    name=name,
+                    cost_price=Decimal(0),
+                    min_price=Decimal(0),
+                )
+                self.db.add(product)
+                await self.db.flush()
+
+            # 3. Create mapping
+            new_mapping = ProductShopMapping(
+                product_id=product.id,
+                shop_id=shop.id,
+                external_sku=external_sku,
+            )
+            self.db.add(new_mapping)
 
     async def _update_finance_data(self, shop_id, finance: List[Dict[str, Any]]):
         for item in finance:
@@ -214,7 +240,6 @@ class SyncService:
                 sale.storage = item.get("storage", sale.storage)
                 sale.returns = item.get("returns", sale.returns)
                 sale.other = item.get("other", sale.other)
-                await self.db.commit()
 
     async def sync_all_active_shops(self, days_back: int = 1) -> List[Dict[str, Any]]:
         result = await self.db.execute(

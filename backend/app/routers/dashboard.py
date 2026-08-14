@@ -7,16 +7,44 @@ from decimal import Decimal
 
 from app.database import get_db
 from app.models import User, Shop, Product, Sale, Stock, Advert, Marketplace
-from app.schemas import DashboardData, KPIData, AlertItem, MarketplaceComparison, UnitEconomicsRow, ProductDashboardRow
+from app.schemas import (
+    DashboardData,
+    KPIData,
+    AlertItem,
+    MarketplaceComparison,
+    UnitEconomicsRow,
+    ProductDashboardRow,
+)
 from app.auth import get_current_user
 
 router = APIRouter()
 
 # Expense ratios (should come from config/DB in production)
 EXPENSE_RATIOS = {
-    "wb": {"commission": 0.15, "logistics": 0.10, "storage": 0.02, "ads": 0.08, "returns": 0.02, "other": 0.01},
-    "ozon": {"commission": 0.12, "logistics": 0.10, "storage": 0.02, "ads": 0.05, "returns": 0.02, "other": 0.01},
-    "ym": {"commission": 0.10, "logistics": 0.10, "storage": 0.02, "ads": 0.04, "returns": 0.02, "other": 0.01},
+    "wb": {
+        "commission": 0.15,
+        "logistics": 0.10,
+        "storage": 0.02,
+        "ads": 0.08,
+        "returns": 0.02,
+        "other": 0.01,
+    },
+    "ozon": {
+        "commission": 0.12,
+        "logistics": 0.10,
+        "storage": 0.02,
+        "ads": 0.05,
+        "returns": 0.02,
+        "other": 0.01,
+    },
+    "ym": {
+        "commission": 0.10,
+        "logistics": 0.10,
+        "storage": 0.02,
+        "ads": 0.04,
+        "returns": 0.02,
+        "other": 0.01,
+    },
 }
 
 MP_NAMES = {"wb": "Wildberries", "ozon": "Ozon", "ym": "Яндекс Маркет"}
@@ -27,7 +55,7 @@ async def get_dashboard(
     period: str = "today",
     marketplace: str = "all",
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     # Get user's shops
     result = await db.execute(select(Shop).where(Shop.user_id == current_user.id))
@@ -50,9 +78,7 @@ async def get_dashboard(
     # Get sales
     sales_result = await db.execute(
         select(Sale).where(
-            Sale.shop_id.in_(shop_ids),
-            Sale.date >= start_date,
-            Sale.is_return == False
+            Sale.shop_id.in_(shop_ids), Sale.date >= start_date, Sale.is_return == False
         )
     )
     sales = sales_result.scalars().all()
@@ -60,9 +86,7 @@ async def get_dashboard(
     # Get returns
     returns_result = await db.execute(
         select(Sale).where(
-            Sale.shop_id.in_(shop_ids),
-            Sale.date >= start_date,
-            Sale.is_return == True
+            Sale.shop_id.in_(shop_ids), Sale.date >= start_date, Sale.is_return == True
         )
     )
     returns = returns_result.scalars().all()
@@ -77,12 +101,14 @@ async def get_dashboard(
     products_result = await db.execute(
         select(Product).where(Product.user_id == current_user.id)
     )
-    products = {p.sku: p for p in products_result.scalars().all()}
+    products = {}
+    for p in products_result.scalars().all():
+        products[p.sku] = p
+        if p.canonical_sku and p.canonical_sku != p.sku:
+            products[p.canonical_sku] = p
 
     # Get stocks
-    stocks_result = await db.execute(
-        select(Stock).where(Stock.shop_id.in_(shop_ids))
-    )
+    stocks_result = await db.execute(select(Stock).where(Stock.shop_id.in_(shop_ids)))
     stocks = stocks_result.scalars().all()
 
     # Calculate KPIs
@@ -120,10 +146,11 @@ async def get_dashboard(
     alerts: List[AlertItem] = []
     for s in stocks:
         if s.quantity < 10:
-            alerts.append(AlertItem(
-                type="warning",
-                text=f"{s.external_sku}: остаток {s.quantity} шт"
-            ))
+            alerts.append(
+                AlertItem(
+                    type="warning", text=f"{s.external_sku}: остаток {s.quantity} шт"
+                )
+            )
 
     # Marketplace comparison
     mp_comparison: List[MarketplaceComparison] = []
@@ -132,26 +159,30 @@ async def get_dashboard(
         rev = sum(s.revenue for s in sales if s.shop_id == shop.id)
         exp = sum(
             s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other
-            for s in sales if s.shop_id == shop.id
+            for s in sales
+            if s.shop_id == shop.id
         )
         gross = rev - exp
         cost = sum(
             products[s.external_sku].cost_price * s.quantity
-            for s in sales if s.shop_id == shop.id and s.external_sku in products
+            for s in sales
+            if s.shop_id == shop.id and s.external_sku in products
         )
         net = gross - cost
         ads = sum(a.spend for a in adverts if a.shop_id == shop.id)
         drr_mp = (ads / rev * 100) if rev > 0 else Decimal(0)
 
-        mp_comparison.append(MarketplaceComparison(
-            marketplace=MP_NAMES.get(mp, mp),
-            revenue=rev,
-            expenses=exp,
-            gross_profit=gross,
-            net_profit=net,
-            net_margin=(net / rev * 100) if rev > 0 else Decimal(0),
-            drr=drr_mp,
-        ))
+        mp_comparison.append(
+            MarketplaceComparison(
+                marketplace=MP_NAMES.get(mp, mp),
+                revenue=rev,
+                expenses=exp,
+                gross_profit=gross,
+                net_profit=net,
+                net_margin=(net / rev * 100) if rev > 0 else Decimal(0),
+                drr=drr_mp,
+            )
+        )
 
     # Unit economics
     unit_rows: List[UnitEconomicsRow] = []
@@ -166,17 +197,19 @@ async def get_dashboard(
         r = EXPENSE_RATIOS.get(mp, EXPENSE_RATIOS["wb"])
         exp_per_unit = s.price * Decimal(sum(r.values()))
         net_per = s.price - p.cost_price - exp_per_unit
-        unit_rows.append(UnitEconomicsRow(
-            sku=p.sku,
-            name=p.name,
-            marketplace=MP_NAMES.get(mp, mp),
-            price=s.price,
-            cost=p.cost_price,
-            expense_per_unit=exp_per_unit,
-            net_per_unit=net_per,
-            sales=s.quantity,
-            total_net=net_per * s.quantity,
-        ))
+        unit_rows.append(
+            UnitEconomicsRow(
+                sku=p.sku,
+                name=p.name,
+                marketplace=MP_NAMES.get(mp, mp),
+                price=s.price,
+                cost=p.cost_price,
+                expense_per_unit=exp_per_unit,
+                net_per_unit=net_per,
+                sales=s.quantity,
+                total_net=net_per * s.quantity,
+            )
+        )
     unit_rows.sort(key=lambda x: x.net_per_unit, reverse=True)
 
     # Product dashboard rows
@@ -184,7 +217,10 @@ async def get_dashboard(
     for p in products.values():
         p_sales = [s for s in sales if s.external_sku == p.sku]
         p_revenue = sum(s.revenue for s in p_sales)
-        p_expenses = sum(s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other for s in p_sales)
+        p_expenses = sum(
+            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other
+            for s in p_sales
+        )
         p_ads = sum(a.spend for a in adverts if a.external_sku == p.sku)
         p_gross = p_revenue - p_expenses
         p_cost = p.cost_price * sum(s.quantity for s in p_sales)
@@ -195,19 +231,21 @@ async def get_dashboard(
         p_stocks = [st for st in stocks if st.external_sku == p.sku]
         total_stock = sum(st.quantity for st in p_stocks)
 
-        product_rows.append(ProductDashboardRow(
-            sku=p.sku,
-            name=p.name,
-            revenue=p_revenue,
-            net_profit=p_net,
-            margin=p_margin,
-            drr=p_drr,
-            avg_price=Decimal(0),  # Will be calculated from actual prices
-            min_price=p.min_price,
-            total_stock=total_stock,
-            alert_price=False,  # Will check against actual prices
-            alert_stock=total_stock < 20,
-        ))
+        product_rows.append(
+            ProductDashboardRow(
+                sku=p.sku,
+                name=p.name,
+                revenue=p_revenue,
+                net_profit=p_net,
+                margin=p_margin,
+                drr=p_drr,
+                avg_price=Decimal(0),  # Will be calculated from actual prices
+                min_price=p.min_price,
+                total_stock=total_stock,
+                alert_price=False,  # Will check against actual prices
+                alert_stock=total_stock < 20,
+            )
+        )
 
     return DashboardData(
         kpi=kpi,
