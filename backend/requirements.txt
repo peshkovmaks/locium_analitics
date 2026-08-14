@@ -8,6 +8,7 @@ alembic==1.14.0
 pydantic==2.9.0
 pydantic-settings==2.6.0
 python-jose[cryptography]==3.3.0
+bcrypt==4.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.17
 redis==5.2.0
