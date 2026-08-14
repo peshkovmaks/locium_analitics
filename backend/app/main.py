@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from app.routers import auth, catalog, dashboard, shops, products
 import os
 
 from app.database import engine, Base
@@ -22,6 +23,7 @@ app.add_middleware(
 )
 
 # API routes
+app.include_router(products.router, prefix="/api/v1", tags=["products"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(catalog.router, prefix="/api/v1/catalog", tags=["catalog"])
 app.include_router(shops.router, prefix="/api/v1/shops", tags=["shops"])
@@ -32,14 +34,35 @@ static_path = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_path):
     app.mount("/static", StaticFiles(directory=static_path), name="static")
 
+
+@app.get("/")
+async def root():
+    """Serve the built React app."""
+    index_path = os.path.join(static_path, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"message": "API is running. Frontend not built yet. Check /health"}
+
+
+@app.get("/{full_path:path}")
+async def catch_all(full_path: str):
+    """Serve React Router routes."""
+    index_path = os.path.join(static_path, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"message": "API is running. Frontend not built yet."}
+
+
 @app.on_event("startup")
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "version": "0.1.0"}
+
 
 @app.get("/")
 async def root():

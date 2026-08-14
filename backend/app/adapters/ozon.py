@@ -1,30 +1,19 @@
-"""Ozon Seller API Adapter.
-
-Verified working endpoints (August 2026):
-- POST /v2/warehouse/list — authentication
-- POST /v5/product/info/prices — prices
-- POST /v2/posting/fbo/list — FBO orders
-- POST /v3/posting/fbs/list — FBS orders
-- POST /v1/analytics/data — sales analytics
-
-Note: /v3/product/info/stocks returns 404 — disabled.
-Note: Advertising requires Performance API (OAuth) — disabled.
-"""
+"""Ozon Seller API Adapter."""
 
 import httpx
 import logging
+import asyncio
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
 
 from app.adapters.base import MarketplaceAdapter
+from app.utils.retry import async_retry
 
 logger = logging.getLogger(__name__)
 
 
 class OzonAdapter(MarketplaceAdapter):
-    """Adapter for Ozon Seller API."""
-
     BASE_URL = "https://api-seller.ozon.ru"
 
     def __init__(self, shop_id: str, credentials: Dict[str, Any]):
@@ -38,7 +27,6 @@ class OzonAdapter(MarketplaceAdapter):
         }
 
     async def authenticate(self) -> bool:
-        """Check credentials by getting warehouse list."""
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -51,21 +39,28 @@ class OzonAdapter(MarketplaceAdapter):
         except Exception:
             return False
 
+    @async_retry(max_retries=3, base_delay=2.0, max_delay=60.0)
     async def _post(self, endpoint: str, data: Optional[Dict] = None) -> Any:
-        """Make POST request to Ozon API."""
         url = f"{self.BASE_URL}{endpoint}"
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url, headers=self.headers, json=data or {}, timeout=30.0
-            )
+            response = await client.post(url, headers=self.headers, json=data or {}, timeout=30.0)
             response.raise_for_status()
             return response.json()
 
-    async def get_sales(
-        self, date_from: datetime, date_to: datetime
-    ) -> List[Dict[str, Any]]:
-        """Get sales data from Ozon analytics."""
-        data = await self._post(
+    async def _post_with_delay(self, endpoint: str, data: Optional[Dict] = None) -> Any:
+        await asyncio.sleep(0.6)
+        return await self._post(endpoint, data)
+
+    def _parse_date(self, date_str: str, fallback: datetime) -> datetime:
+        if not date_str:
+            return fallback
+        try:
+            return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return fallback
+
+    async def get_sales(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
+        data = await self._post_with_delay(
             "/v1/analytics/data",
             {
                 "date_from": date_from.strftime("%Y-%m-%d"),
@@ -82,43 +77,34 @@ class OzonAdapter(MarketplaceAdapter):
         for item in data.get("data", []):
             dimensions = item.get("dimensions", [{}])[0]
             metrics = item.get("metrics", [0, 0, 0])
-            sales.append(
-                {
-                    "date": datetime.strptime(dimensions.get("day", ""), "%Y-%m-%d"),
-                    "external_sku": str(dimensions.get("sku", "")),
-                    "external_id": str(dimensions.get("sku", "")),
-                    "quantity": int(metrics[0] or 0),
-                    "price": Decimal("0"),
-                    "revenue": Decimal(str(metrics[1] or 0)),
-                    "commission": Decimal("0"),
-                    "logistics": Decimal("0"),
-                    "storage": Decimal("0"),
-                    "advertising": Decimal("0"),
-                    "returns": Decimal("0"),
-                    "other": Decimal("0"),
-                    "is_return": False,
-                }
-            )
+
+            sales.append({
+                "date": datetime.strptime(dimensions.get("day", ""), "%Y-%m-%d") if dimensions.get("day") else date_from,
+                "external_sku": str(dimensions.get("sku", "")),
+                "external_id": str(dimensions.get("sku", "")),
+                "quantity": int(metrics[0] or 0),
+                "price": Decimal("0"),
+                "revenue": Decimal(str(metrics[1] or 0)),
+                "commission": Decimal("0"),
+                "logistics": Decimal("0"),
+                "storage": Decimal("0"),
+                "advertising": Decimal("0"),
+                "returns": Decimal("0"),
+                "other": Decimal("0"),
+                "is_return": False,
+            })
         return sales
 
-    async def get_orders(
-        self, date_from: datetime, date_to: datetime
-    ) -> List[Dict[str, Any]]:
-        """Get orders from Ozon (FBO + FBS)."""
+    async def get_orders(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         orders = []
 
-        # FBO orders
-        fbo_data = await self._post(
+        fbo_data = await self._post_with_delay(
             "/v2/posting/fbo/list",
             {
                 "dir": "ASC",
                 "filter": {
-                    "since": date_from.astimezone(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
-                    "to": date_to.astimezone(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
+                    "since": date_from.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "to": date_to.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
                 },
                 "limit": 1000,
                 "offset": 0,
@@ -127,32 +113,24 @@ class OzonAdapter(MarketplaceAdapter):
         )
 
         for item in fbo_data.get("result", []):
+            created_at = self._parse_date(item.get("created_at", ""), date_from)
             for product in item.get("products", []):
-                orders.append(
-                    {
-                        "date": datetime.fromisoformat(
-                            item.get("created_at", "").replace("Z", "+00:00")
-                        ),
-                        "external_sku": str(product.get("offer_id", "")),
-                        "external_id": str(product.get("sku", "")),
-                        "quantity": product.get("quantity", 1),
-                        "price": Decimal(str(product.get("price", "0") or "0")),
-                        "status": item.get("status", ""),
-                    }
-                )
+                orders.append({
+                    "date": created_at,
+                    "external_sku": str(product.get("offer_id", "")),
+                    "external_id": str(product.get("sku", "")),
+                    "quantity": product.get("quantity", 1),
+                    "price": Decimal(str(product.get("price", "0") or "0")),
+                    "status": item.get("status", ""),
+                })
 
-        # FBS orders
-        fbs_data = await self._post(
+        fbs_data = await self._post_with_delay(
             "/v3/posting/fbs/list",
             {
                 "dir": "ASC",
                 "filter": {
-                    "since": date_from.astimezone(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
-                    "to": date_to.astimezone(timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z"),
+                    "since": date_from.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "to": date_to.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
                 },
                 "limit": 1000,
                 "offset": 0,
@@ -161,82 +139,95 @@ class OzonAdapter(MarketplaceAdapter):
         )
 
         for item in fbs_data.get("result", {}).get("postings", []):
+            created_at = self._parse_date(item.get("created_at", ""), date_from)
             for product in item.get("products", []):
-                orders.append(
-                    {
-                        "date": datetime.fromisoformat(
-                            item.get("created_at", "").replace("Z", "+00:00")
-                        ),
-                        "external_sku": str(product.get("offer_id", "")),
-                        "external_id": str(product.get("sku", "")),
-                        "quantity": product.get("quantity", 1),
-                        "price": Decimal(str(product.get("price", "0") or "0")),
-                        "status": item.get("status", ""),
-                    }
-                )
+                orders.append({
+                    "date": created_at,
+                    "external_sku": str(product.get("offer_id", "")),
+                    "external_id": str(product.get("sku", "")),
+                    "quantity": product.get("quantity", 1),
+                    "price": Decimal(str(product.get("price", "0") or "0")),
+                    "status": item.get("status", ""),
+                })
 
         return orders
 
     async def get_stocks(self) -> List[Dict[str, Any]]:
-        """STOCKS DISABLED: Ozon stocks endpoint returns 404.
-        Returns empty list to avoid breaking sync."""
-        logger.info("Ozon stocks skipped: endpoint unavailable (404)")
-        return []
+        try:
+            data = await self._post_with_delay(
+                "/v3/product/info/stocks",
+                {"page": 1, "page_size": 1000},
+            )
 
-    async def get_adverts(
-        self, date_from: datetime, date_to: datetime
-    ) -> List[Dict[str, Any]]:
-        """ADVERTS DISABLED: Requires Performance API (OAuth).
-        Returns empty list."""
-        logger.info("Ozon adverts skipped: requires Performance API (OAuth)")
+            stocks = []
+            for item in data.get("items", []):
+                stock_entries = item.get("stocks", [])
+                total_present = sum(s.get("present", 0) for s in stock_entries)
+                total_reserved = sum(s.get("reserved", 0) for s in stock_entries)
+
+                stocks.append({
+                    "external_sku": str(item.get("offer_id", "")),
+                    "external_id": str(item.get("product_id", "")),
+                    "warehouse": stock_entries[0].get("warehouse_name", "FBS") if stock_entries else "FBS",
+                    "quantity": total_present,
+                    "in_way": total_reserved,
+                })
+            return stocks
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("Ozon /v3/product/info/stocks returned 404, skipping stocks")
+                return []
+            raise
+
+    async def get_adverts(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
+        logger.warning("Ozon ads skipped: requires Performance API (OAuth). Seller API does not provide campaign endpoints.")
         return []
 
     async def get_prices(self) -> List[Dict[str, Any]]:
-        """Get current prices from Ozon (v5)."""
-        data = await self._post(
-            "/v5/product/info/prices",
-            {
-                "filter": {"visibility": "ALL"},
-                "limit": 1000,
-                "cursor": "",
-            },
-        )
-
-        prices = []
-        for item in data.get("items", []):
-            price_info = item.get("price", {})
-            price_val = (
-                price_info.get("price", 0)
-                if isinstance(price_info, dict)
-                else item.get("price", 0)
-            )
-            prices.append(
+        try:
+            data = await self._post_with_delay(
+                "/v5/product/info/prices",
                 {
+                    "filter": {"visibility": "ALL"},
+                    "limit": 1000,
+                    "cursor": "",
+                },
+            )
+
+            prices = []
+            for item in data.get("items", []):
+                price_info = item.get("price", {})
+                if isinstance(price_info, dict):
+                    price_val = price_info.get("price", 0)
+                else:
+                    price_val = item.get("price", 0)
+                prices.append({
                     "external_sku": str(item.get("offer_id", "")),
                     "external_id": str(item.get("sku", "")),
                     "price": Decimal(str(price_val or 0)),
                     "discount": item.get("discount", 0),
-                }
-            )
-        return prices
+                })
+            return prices
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("Ozon /v5/product/info/prices returned 404, skipping prices")
+                return []
+            raise
 
-    async def get_finance_report(
-        self, date_from: datetime, date_to: datetime
-    ) -> List[Dict[str, Any]]:
-        """Get finance realization report from Ozon."""
-        data = await self._post(
-            "/v1/finance/realization",
-            {
-                "date_from": date_from.strftime("%Y-%m-%d"),
-                "date_to": date_to.strftime("%Y-%m-%d"),
-            },
-        )
-
-        reports = []
-        for item in data.get("realization", []):
-            reports.append(
+    async def get_finance_report(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
+        try:
+            data = await self._post_with_delay(
+                "/v1/finance/realization",
                 {
-                    "date": datetime.strptime(item.get("date", ""), "%Y-%m-%d"),
+                    "date_from": date_from.strftime("%Y-%m-%d"),
+                    "date_to": date_to.strftime("%Y-%m-%d"),
+                },
+            )
+
+            reports = []
+            for item in data.get("realization", []):
+                reports.append({
+                    "date": datetime.strptime(item.get("date", ""), "%Y-%m-%d") if item.get("date") else date_from,
                     "external_sku": str(item.get("offer_id", "")),
                     "external_id": str(item.get("sku", "")),
                     "quantity": item.get("quantity", 0),
@@ -247,6 +238,10 @@ class OzonAdapter(MarketplaceAdapter):
                     "storage": Decimal(str(item.get("storage", 0))),
                     "returns": Decimal(str(item.get("returns", 0))),
                     "other": Decimal(str(item.get("other", 0))),
-                }
-            )
-        return reports
+                })
+            return reports
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("Ozon /v1/finance/realization returned 404, skipping finance")
+                return []
+            raise

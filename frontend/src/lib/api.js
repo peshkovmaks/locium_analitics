@@ -1,0 +1,51 @@
+const API_BASE = '/api/v1';
+
+function getToken() {
+  return localStorage.getItem('token');
+}
+
+function headers() {
+  const h = { 'Content-Type': 'application/json' };
+  const t = getToken();
+  if (t) h['Authorization'] = `Bearer ${t}`;
+  return h;
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...opts,
+    headers: { ...headers(), ...(opts.headers || {}) },
+  });
+  if (res.status === 401) {
+    localStorage.removeItem('token');
+    window.location.href = '/login';
+    return;
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export const auth = {
+  login: (email, password) =>
+    api('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+};
+
+export const dashboard = {
+  getData: (period = 'today', marketplace = 'all') =>
+    api(`/dashboard/data?period=${period}&marketplace=${marketplace}`),
+};
+
+export const products = {
+  list: () => api('/products'),
+  updateCost: (sku, costPrice) =>
+    api(`/products/${sku}/cost`, {
+      method: 'PUT',
+      body: JSON.stringify({ cost_price: costPrice }),
+    }),
+};
