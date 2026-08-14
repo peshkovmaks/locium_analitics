@@ -51,6 +51,10 @@ class ProductUpdate(BaseModel):
     category: Optional[str] = None
 
 
+class ProductCostUpdate(BaseModel):  # ← ДОБАВИТЬ
+    cost_price: float = Field(..., ge=0)
+
+
 class ProductOut(BaseModel):
     id: UUID
     sku: str
@@ -63,10 +67,6 @@ class ProductOut(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-class ProductCostUpdate(BaseModel):
-    cost_price: float = Field(..., ge=0)
 
 
 # --- Shops ---

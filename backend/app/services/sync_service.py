@@ -16,7 +16,7 @@ class SyncService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def sync_shop(self, shop: Shop, days_back: int = 7) -> Dict[str, Any]:
+    async def sync_shop(self, shop: Shop, days_back: int = 1) -> Dict[str, Any]:
         """Sync all data for a single shop."""
         adapter = AdapterFactory.create(
             shop.marketplace.value,
@@ -45,16 +45,11 @@ class SyncService:
         }
 
         try:
-            # 1. Sync orders (real-time via FBO+FBS) instead of delayed analytics
-            if hasattr(adapter, "get_orders"):
-                orders = await adapter.get_orders(date_from, date_to)
-                await self._save_orders_as_sales(shop.id, orders)
-                results["sales"] = len(orders)
-            else:
-                sales = await adapter.get_sales(date_from, date_to)
-                await self._save_sales(shop.id, sales)
-                await self._ensure_products(shop.id, sales)  # ← ДОБАВИТЬ
-                results["sales"] = len(sales)
+            # 1. Sync sales
+            sales = await adapter.get_sales(date_from, date_to)
+            await self._save_sales(shop.id, sales)
+            await self._ensure_products(shop.id, sales)
+            results["sales"] = len(sales)
 
             # 2. Sync stocks
             stocks = await adapter.get_stocks()
@@ -71,7 +66,7 @@ class SyncService:
             prices = await adapter.get_prices()
             results["prices"] = len(prices)
 
-            # 5. Finance report (optional)
+            # 5. Finance report
             try:
                 finance = await adapter.get_finance_report(date_from, date_to)
                 if finance:
@@ -90,6 +85,37 @@ class SyncService:
 
         return results
 
+    async def _ensure_products(self, shop_id, items):
+        """Create Product records for new SKUs."""
+        result = await self.db.execute(select(Shop).where(Shop.id == shop_id))
+        shop = result.scalar_one_or_none()
+        if not shop:
+            return
+
+        for item in items:
+            sku = item.get("external_sku")
+            name = item.get("name") or sku or "Unknown"
+            if not sku:
+                continue
+
+            existing = await self.db.execute(
+                select(Product).where(
+                    Product.user_id == shop.user_id, Product.sku == sku
+                )
+            )
+            if existing.scalar_one_or_none():
+                continue
+
+            product = Product(
+                user_id=shop.user_id,
+                sku=sku,
+                name=name,
+                cost_price=Decimal(0),
+                min_price=Decimal(0),
+            )
+            self.db.add(product)
+        await self.db.commit()
+
     async def _save_sales(self, shop_id, sales: List[Dict[str, Any]]):
         for item in sales:
             sale = Sale(
@@ -107,32 +133,6 @@ class SyncService:
                 returns=item.get("returns", Decimal(0)),
                 other=item.get("other", Decimal(0)),
                 is_return=item.get("is_return", False),
-            )
-            self.db.add(sale)
-        await self.db.commit()
-
-    async def _save_orders_as_sales(self, shop_id, orders: List[Dict[str, Any]]):
-        """Convert orders to sales format."""
-        for item in orders:
-            # Skip cancelled/returned orders
-            status = item.get("status", "").upper()
-            is_return = status in ("CANCELLED", "CANCELLED_BY_CUSTOMER", "RETURNED")
-
-            sale = Sale(
-                shop_id=shop_id,
-                date=item["date"],
-                external_sku=item["external_sku"],
-                external_id=item.get("external_id"),
-                quantity=item["quantity"],
-                price=item["price"],
-                revenue=item["price"] * item["quantity"],
-                commission=Decimal(0),
-                logistics=Decimal(0),
-                storage=Decimal(0),
-                advertising=Decimal(0),
-                returns=Decimal(0),
-                other=Decimal(0),
-                is_return=is_return,
             )
             self.db.add(sale)
         await self.db.commit()
@@ -184,9 +184,9 @@ class SyncService:
                 sale.storage = item.get("storage", sale.storage)
                 sale.returns = item.get("returns", sale.returns)
                 sale.other = item.get("other", sale.other)
-        await self.db.commit()
+                await self.db.commit()
 
-    async def sync_all_active_shops(self, days_back: int = 7) -> List[Dict[str, Any]]:
+    async def sync_all_active_shops(self, days_back: int = 1) -> List[Dict[str, Any]]:
         result = await self.db.execute(
             select(Shop).where(Shop.is_active == True, Shop.sync_enabled == True)
         )
@@ -198,40 +198,3 @@ class SyncService:
             results.append(shop_result)
 
         return results
-
-    async def _ensure_products(self, shop_id, items):
-        # """Create Product records for new SKUs."""
-        from sqlalchemy import select
-
-        # Получаем shop для user_id
-        result = await self.db.execute(select(Shop).where(Shop.id == shop_id))
-        shop = result.scalar_one_or_none()
-        if not shop:
-            return
-
-        for item in items:
-            sku = item.get("external_sku")
-            name = item.get("name", sku)
-            if not sku:
-                continue
-
-            # Проверяем, есть ли уже такой продукт у этого пользователя
-            existing = await self.db.execute(
-                select(Product).where(
-                    Product.user_id == shop.user_id, Product.sku == sku
-                )
-            )
-            if existing.scalar_one_or_none():
-                continue
-
-        # Создаём новый продукт
-        product = Product(
-            user_id=shop.user_id,
-            sku=sku,
-            name=name,
-            cost_price=Decimal(0),
-            min_price=Decimal(0),
-        )
-        self.db.add(product)
-
-    await self.db.commit()
