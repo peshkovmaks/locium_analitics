@@ -1,6 +1,6 @@
 """Encryption utilities for sensitive data (API keys, tokens)."""
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from app.config import get_settings
 
 settings = get_settings()
@@ -28,11 +28,17 @@ def encrypt_value(value: str) -> str:
 
 
 def decrypt_value(encrypted_value: str) -> str:
-    """Decrypt an encrypted string value."""
+    """Decrypt an encrypted string value. Gracefully handles plain text."""
     if not encrypted_value:
         return encrypted_value
+    # If it doesn't look like a Fernet token, return as-is
+    if not encrypted_value.startswith("gAAAAAB"):
+        return encrypted_value
     f = get_fernet()
-    return f.decrypt(encrypted_value.encode()).decode()
+    try:
+        return f.decrypt(encrypted_value.encode()).decode()
+    except InvalidToken:
+        return encrypted_value
 
 
 def encrypt_dict(data: dict) -> dict:
