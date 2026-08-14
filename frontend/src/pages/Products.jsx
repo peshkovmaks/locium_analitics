@@ -44,6 +44,9 @@ export default function Products() {
     }
   }
 
+  // Канонический SKU: используем canonical_sku, если есть, иначе sku
+  const getSku = (p) => p.canonical_sku || p.sku;
+
   if (loading) return <div className="text-center py-20 text-gray-500">Загрузка...</div>;
   if (error) return <div className="text-center py-20 text-red-600">Ошибка: {error}</div>;
 
@@ -65,56 +68,59 @@ export default function Products() {
             </tr>
           </thead>
           <tbody>
-            {list.map((p) => (
-              <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
-                <td className="px-6 py-3 font-mono text-xs text-gray-600">{p.sku}</td>
-                <td className="px-6 py-3 font-medium text-gray-900">{p.name}</td>
-                <td className="px-6 py-3 text-right">
-                  {editingSku === p.sku ? (
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      className="w-32 px-2 py-1 border border-gray-300 rounded text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      autoFocus
-                    />
-                  ) : (
-                    <span>{formatMoney(p.cost_price)}</span>
-                  )}
-                </td>
-                <td className="px-6 py-3 text-right">{formatMoney(p.min_price)}</td>
-                <td className="px-6 py-3 text-center">
-                  {editingSku === p.sku ? (
-                    <div className="flex items-center justify-center gap-2">
+            {list.map((p) => {
+              const sku = getSku(p); // ← вот тут берём канонический SKU
+              return (
+                <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
+                  <td className="px-6 py-3 font-mono text-xs text-gray-600">{sku}</td>
+                  <td className="px-6 py-3 font-medium text-gray-900">{p.name}</td>
+                  <td className="px-6 py-3 text-right">
+                    {editingSku === sku ? (
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        className="w-32 px-2 py-1 border border-gray-300 rounded text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        autoFocus
+                      />
+                    ) : (
+                      <span>{formatMoney(p.cost_price)}</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-3 text-right">{formatMoney(p.min_price)}</td>
+                  <td className="px-6 py-3 text-center">
+                    {editingSku === sku ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => saveCost(sku)}
+                          disabled={saving}
+                          className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {saving ? '...' : 'Сохранить'}
+                        </button>
+                        <button
+                          onClick={() => setEditingSku(null)}
+                          className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-xs font-medium hover:bg-gray-300"
+                        >
+                          Отмена
+                        </button>
+                      </div>
+                    ) : (
                       <button
-                        onClick={() => saveCost(p.sku)}
-                        disabled={saving}
-                        className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+                        onClick={() => {
+                          setEditingSku(sku);
+                          setEditValue(p.cost_price);
+                        }}
+                        className="px-3 py-1 text-blue-600 hover:text-blue-700 text-xs font-medium"
                       >
-                        {saving ? '...' : 'Сохранить'}
+                        Изменить
                       </button>
-                      <button
-                        onClick={() => setEditingSku(null)}
-                        className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-xs font-medium hover:bg-gray-300"
-                      >
-                        Отмена
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        setEditingSku(p.sku);
-                        setEditValue(p.cost_price);
-                      }}
-                      className="px-3 py-1 text-blue-600 hover:text-blue-700 text-xs font-medium"
-                    >
-                      Изменить
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -125,4 +131,4 @@ export default function Products() {
       )}
     </div>
   );
-}
+}  

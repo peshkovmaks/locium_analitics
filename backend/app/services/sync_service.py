@@ -85,35 +85,65 @@ class SyncService:
 
         return results
 
-    async def _ensure_products(self, shop_id, items):
-        """Create Product records for new SKUs."""
+        async def _ensure_products(self, shop_id, items):
+        """Create Product records for new SKUs with shop mappings."""
         result = await self.db.execute(select(Shop).where(Shop.id == shop_id))
         shop = result.scalar_one_or_none()
         if not shop:
             return
 
         for item in items:
-            sku = item.get("external_sku")
-            name = item.get("name") or sku or "Unknown"
-            if not sku:
+            external_sku = item.get("external_sku")
+            name = item.get("name") or external_sku or "Unknown"
+            if not external_sku:
                 continue
 
-            existing = await self.db.execute(
-                select(Product).where(
-                    Product.user_id == shop.user_id, Product.sku == sku
+            # 1. Есть ли уже маппинг для этого магазина + внешнего SKU?
+            mapping_result = await self.db.execute(
+                select(ProductShopMapping).where(
+                    ProductShopMapping.shop_id == shop_id,
+                    ProductShopMapping.external_sku == external_sku,
                 )
             )
-            if existing.scalar_one_or_none():
+            mapping = mapping_result.scalar_one_or_none()
+
+            if mapping:
+                # Обновляем название товара, если изменилось
+                if mapping.product and mapping.product.name != name:
+                    mapping.product.name = name
                 continue
 
-            product = Product(
-                user_id=shop.user_id,
-                sku=sku,
-                name=name,
-                cost_price=Decimal(0),
-                min_price=Decimal(0),
+            # 2. Есть ли уже Product с таким canonical_sku у этого пользователя?
+            #    (первый раз canonical_sku = external_sku от первой площадки)
+            product_result = await self.db.execute(
+                select(Product).where(
+                    Product.user_id == shop.user_id,
+                    Product.canonical_sku == external_sku,
+                )
             )
-            self.db.add(product)
+            product = product_result.scalar_one_or_none()
+
+            if not product:
+                # Создаём новый товар
+                product = Product(
+                    user_id=shop.user_id,
+                    sku=external_sku,               # канонический = первый внешний
+                    canonical_sku=external_sku,   # ← важно
+                    name=name,
+                    cost_price=Decimal(0),
+                    min_price=Decimal(0),
+                )
+                self.db.add(product)
+                await self.db.flush()  # чтобы product.id появился
+
+            # 3. Создаём маппинг
+            new_mapping = ProductShopMapping(
+                product_id=product.id,
+                shop_id=shop_id,
+                external_sku=external_sku,
+            )
+            self.db.add(new_mapping)
+
         await self.db.commit()
 
     async def _save_sales(self, shop_id, sales: List[Dict[str, Any]]):

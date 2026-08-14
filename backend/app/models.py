@@ -1,6 +1,17 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Enum, Numeric, Text, JSON
+from sqlalchemy import (
+    Column,
+    String,
+    Integer,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Enum,
+    Numeric,
+    Text,
+    JSON,
+)
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -28,14 +39,18 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     shops = relationship("Shop", back_populates="user", cascade="all, delete-orphan")
-    products = relationship("Product", back_populates="user", cascade="all, delete-orphan")
+    products = relationship(
+        "Product", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Shop(Base):
     __tablename__ = "shops"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     marketplace = Column(Enum(Marketplace), nullable=False)
     name = Column(String(255), nullable=False)
     credentials = Column(JSONB, default={})  # Encrypted API keys
@@ -45,18 +60,23 @@ class Shop(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="shops")
-    shop_products = relationship("ShopProduct", back_populates="shop", cascade="all, delete-orphan")
+    shop_products = relationship(
+        "ShopProduct", back_populates="shop", cascade="all, delete-orphan"
+    )
     sales = relationship("Sale", back_populates="shop", cascade="all, delete-orphan")
     stocks = relationship("Stock", back_populates="shop", cascade="all, delete-orphan")
-    adverts = relationship("Advert", back_populates="shop", cascade="all, delete-orphan")
+    adverts = relationship(
+        "Advert", back_populates="shop", cascade="all, delete-orphan"
+    )
 
 
 class Product(Base):
     __tablename__ = "products"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    sku = Column(String(100), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    sku = Column(String(100), nullable=False)  # ← канонический SKU
+    canonical_sku = Column(String(100), nullable=True)  # ← ДОБАВИТЬ
     name = Column(String(500), nullable=False)
     cost_price = Column(Numeric(12, 2), default=0)
     min_price = Column(Numeric(12, 2), default=0)
@@ -65,15 +85,23 @@ class Product(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="products")
-    shop_products = relationship("ShopProduct", back_populates="product", cascade="all, delete-orphan")
+    mappings = relationship(
+        "ProductShopMapping", back_populates="product", cascade="all, delete-orphan"
+    )
 
 
 class ShopProduct(Base):
     __tablename__ = "shop_products"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), nullable=False)
-    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    shop_id = Column(
+        UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), nullable=False
+    )
+    product_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     external_sku = Column(String(255), nullable=False)
     external_id = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
@@ -86,7 +114,9 @@ class Sale(Base):
     __tablename__ = "sales"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), nullable=False)
+    shop_id = Column(
+        UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), nullable=False
+    )
     date = Column(DateTime, nullable=False, index=True)
     external_sku = Column(String(255), nullable=False, index=True)
     external_id = Column(String(255), nullable=True)
@@ -109,7 +139,9 @@ class Stock(Base):
     __tablename__ = "stocks"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), nullable=False)
+    shop_id = Column(
+        UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), nullable=False
+    )
     date = Column(DateTime, nullable=False, index=True)
     external_sku = Column(String(255), nullable=False, index=True)
     warehouse = Column(String(255), nullable=True)
@@ -124,7 +156,9 @@ class Advert(Base):
     __tablename__ = "adverts"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), nullable=False)
+    shop_id = Column(
+        UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), nullable=False
+    )
     date = Column(DateTime, nullable=False, index=True)
     campaign_id = Column(String(255), nullable=True)
     external_sku = Column(String(255), nullable=False, index=True)
@@ -138,3 +172,16 @@ class Advert(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     shop = relationship("Shop", back_populates="adverts")
+
+
+class ProductShopMapping(Base):
+    __tablename__ = "product_shop_mappings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id"), nullable=False)
+    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id"), nullable=False)
+    external_sku = Column(String(100), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    product = relationship("Product", back_populates="mappings")
+    shop = relationship("Shop")

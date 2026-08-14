@@ -58,6 +58,7 @@ class ProductCostUpdate(BaseModel):  # ← ДОБАВИТЬ
 class ProductOut(BaseModel):
     id: UUID
     sku: str
+    canonical_sku: Optional[str]  # ← ДОБАВИТЬ
     name: str
     cost_price: Decimal
     min_price: Decimal
