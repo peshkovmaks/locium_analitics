@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.adapters.base import AdapterFactory
-from app.models import Shop, Sale, Stock, Advert, Product
+from app.models import Shop, Sale, Stock, Advert, Product, ProductShopMapping
 
 
 class SyncService:
