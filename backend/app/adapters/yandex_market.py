@@ -217,6 +217,39 @@ class YandexMarketAdapter(MarketplaceAdapter):
             })
         return adverts
 
+    async def get_product_info(self, offer_ids: List[str]) -> Dict[str, str]:
+        """Fetch product names from Yandex Market catalog.
+
+        Uses /v2/businesses/{businessId}/offer-mappings
+        Returns a mapping offerId -> name.
+        """
+        if not self.business_id or not offer_ids:
+            return {}
+
+        try:
+            data = await self._post(
+                f"/v2/businesses/{self.business_id}/offer-mappings",
+                {"offerIds": list(set(offer_ids))},
+            )
+
+            result = {}
+            for item in data.get("result", {}).get("offerMappings", []):
+                offer = item.get("offer", {}) or {}
+                mapping = item.get("mapping", {}) or {}
+                offer_id = str(offer.get("offerId", ""))
+                if not offer_id:
+                    continue
+                name = (
+                    offer.get("name")
+                    or mapping.get("marketSkuName")
+                    or offer_id
+                )
+                result[offer_id] = name
+            return result
+        except Exception as e:
+            logger.warning("YM offer-mappings failed: %s", e)
+            return {}
+
     async def get_prices(self) -> List[Dict[str, Any]]:
         """Get current prices from Yandex Market.
 

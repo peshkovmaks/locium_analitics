@@ -55,6 +55,11 @@ class ProductCostUpdate(BaseModel):
     cost_price: float = Field(..., ge=0)
 
 
+class ProductMerge(BaseModel):
+    source_skus: List[str]
+    target_sku: str
+
+
 class ProductOut(BaseModel):
     id: UUID
     sku: str

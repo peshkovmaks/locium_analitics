@@ -48,4 +48,9 @@ export const products = {
       method: 'PUT',
       body: JSON.stringify({ cost_price: costPrice }),
     }),
+  merge: (sourceSkus, targetSku) =>
+    api('/products/merge', {
+      method: 'POST',
+      body: JSON.stringify({ source_skus: sourceSkus, target_sku: targetSku }),
+    }),
 };

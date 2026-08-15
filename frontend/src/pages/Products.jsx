@@ -14,6 +14,8 @@ export default function Products() {
   const [editingSku, setEditingSku] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+  const [merging, setMerging] = useState(false);
 
   useEffect(() => {
     load();
@@ -44,6 +46,34 @@ export default function Products() {
     }
   }
 
+  function toggleSku(sku) {
+    const next = new Set(selected);
+    if (next.has(sku)) {
+      next.delete(sku);
+    } else {
+      next.add(sku);
+    }
+    setSelected(next);
+  }
+
+  async function mergeSelected() {
+    if (selected.size < 2) return;
+    const skus = Array.from(selected);
+    const target = skus[0];
+    const sources = skus.slice(1);
+    if (!window.confirm(`Объединить ${sources.length} товар(а) в «${target}»?`)) return;
+    setMerging(true);
+    try {
+      await products.merge(sources, target);
+      setSelected(new Set());
+      load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setMerging(false);
+    }
+  }
+
   // Канонический SKU: используем canonical_sku, если есть, иначе sku
   const getSku = (p) => p.canonical_sku || p.sku;
 
@@ -54,12 +84,37 @@ export default function Products() {
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
       <div className="p-6 border-b border-gray-100 flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">Товары</h1>
-        <span className="text-sm text-gray-500">Всего: {list.length}</span>
+        <div className="flex items-center gap-4">
+          {selected.size >= 2 && (
+            <button
+              onClick={mergeSelected}
+              disabled={merging}
+              className="px-3 py-1.5 bg-purple-600 text-white rounded text-xs font-medium hover:bg-purple-700 disabled:opacity-50"
+            >
+              {merging ? '...' : `Объединить выбранные (${selected.size})`}
+            </button>
+          )}
+          <span className="text-sm text-gray-500">Всего: {list.length}</span>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-gray-500 border-b border-gray-100 bg-gray-50">
+              <th className="px-4 py-3 font-medium w-10">
+                <input
+                  type="checkbox"
+                  checked={list.length > 0 && selected.size === list.length}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelected(new Set(list.map(getSku)));
+                    } else {
+                      setSelected(new Set());
+                    }
+                  }}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+              </th>
               <th className="px-6 py-3 font-medium">SKU</th>
               <th className="px-6 py-3 font-medium">Название</th>
               <th className="px-6 py-3 font-medium text-right">Себестоимость</th>
@@ -72,6 +127,14 @@ export default function Products() {
               const sku = getSku(p); // ← вот тут берём канонический SKU
               return (
                 <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(sku)}
+                      onChange={() => toggleSku(sku)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                  </td>
                   <td className="px-6 py-3 font-mono text-xs text-gray-600">{sku}</td>
                   <td className="px-6 py-3 font-medium text-gray-900">{p.name}</td>
                   <td className="px-6 py-3 text-right">

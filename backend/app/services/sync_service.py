@@ -210,9 +210,16 @@ class SyncService:
             if not external_sku:
                 continue
 
-            # Use a real name if available; never downgrade an existing name to a bare SKU.
-            raw_name = item.get("name") or names.get(external_sku)
-            has_real_name = raw_name and raw_name != external_sku
+            # Use a real name if available; prefer fetched names over item-level fallbacks.
+            fetched_name = names.get(external_sku)
+            item_name = item.get("name")
+            if item_name and item_name != external_sku:
+                raw_name = item_name
+            elif fetched_name and fetched_name != external_sku:
+                raw_name = fetched_name
+            else:
+                raw_name = None
+            has_real_name = bool(raw_name)
             fallback_name = external_sku or "Unknown"
 
             # 1. Check existing mapping and eagerly load related product
