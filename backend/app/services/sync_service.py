@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 
 from app.adapters.base import AdapterFactory
@@ -38,7 +38,9 @@ class SyncService:
                 "message": "Authentication failed",
             }
 
-        date_from = datetime.utcnow() - timedelta(days=days_back)
+        date_from = (datetime.utcnow() - timedelta(days=days_back)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         date_to = datetime.utcnow()
 
         results = {
@@ -55,6 +57,8 @@ class SyncService:
 
         try:
             # 1. Sync sales — prefer real-time orders over delayed analytics
+            # Remove previous data for the same period to avoid duplicates.
+            await self._clear_sales(shop.id, date_from, date_to)
             if hasattr(adapter, 'get_orders'):
                 orders = await adapter.get_orders(date_from, date_to)
                 await self._save_orders_as_sales(shop.id, orders)
@@ -68,6 +72,7 @@ class SyncService:
 
             # 2. Sync stocks
             try:
+                await self._clear_stocks(shop.id)
                 stocks = await adapter.get_stocks()
                 await self._save_stocks(shop.id, stocks)
                 all_items.extend(stocks)
@@ -77,6 +82,7 @@ class SyncService:
 
             # 3. Sync adverts
             try:
+                await self._clear_adverts(shop.id, date_from, date_to)
                 adverts = await adapter.get_adverts(date_from, date_to)
                 await self._save_adverts(shop.id, adverts)
                 results["adverts"] = len(adverts)
@@ -125,11 +131,15 @@ class SyncService:
 
         return results
 
+    def _naive_dt(self, value: datetime) -> datetime:
+        return value.replace(tzinfo=None) if value and value.tzinfo else value
+
     async def _save_sales(self, shop_id, sales: List[Dict[str, Any]]):
         for item in sales:
             sale = Sale(
                 shop_id=shop_id,
-                date=item["date"],
+                date=self._naive_dt(item["date"]),
+
                 external_sku=item["external_sku"],
                 external_id=item.get("external_id"),
                 quantity=item["quantity"],
@@ -145,6 +155,27 @@ class SyncService:
             )
             self.db.add(sale)
 
+    async def _clear_sales(self, shop_id, date_from: datetime, date_to: datetime):
+        await self.db.execute(
+            delete(Sale).where(
+                Sale.shop_id == shop_id,
+                Sale.date >= date_from,
+                Sale.date <= date_to + timedelta(days=1),
+            )
+        )
+
+    async def _clear_stocks(self, shop_id):
+        await self.db.execute(delete(Stock).where(Stock.shop_id == shop_id))
+
+    async def _clear_adverts(self, shop_id, date_from: datetime, date_to: datetime):
+        await self.db.execute(
+            delete(Advert).where(
+                Advert.shop_id == shop_id,
+                Advert.date >= date_from,
+                Advert.date <= date_to + timedelta(days=1),
+            )
+        )
+
     async def _save_orders_as_sales(self, shop_id, orders: List[Dict[str, Any]]):
         """Convert real-time orders to sales format."""
         for item in orders:
@@ -153,7 +184,7 @@ class SyncService:
 
             sale = Sale(
                 shop_id=shop_id,
-                date=item["date"],
+                date=self._naive_dt(item["date"]),
                 external_sku=item["external_sku"],
                 external_id=item.get("external_id"),
                 quantity=item["quantity"],
