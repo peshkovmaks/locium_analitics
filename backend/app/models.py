@@ -11,6 +11,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     JSON,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
@@ -122,8 +123,12 @@ class Sale(Base):
     )
     date = Column(DateTime, nullable=False, index=True)
     external_sku = Column(String(255), nullable=False, index=True)
-    external_id = Column(String(255), nullable=True)
+    external_id = Column(String(255), nullable=False)
     quantity = Column(Integer, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("shop_id", "external_id", "external_sku", name="uix_sale_order_sku"),
+    )
     price = Column(Numeric(12, 2), default=0)
     revenue = Column(Numeric(12, 2), default=0)
     commission = Column(Numeric(12, 2), default=0)

@@ -125,6 +125,7 @@ class YandexMarketAdapter(MarketplaceAdapter):
             except (ValueError, AttributeError):
                 sale_date = datetime.utcnow()
 
+            order_id = str(item.get("id", ""))
             for product in item.get("items", []):
                 shop_sku = str(product.get("shopSku", ""))
                 prices = product.get("prices", []) or []
@@ -139,7 +140,7 @@ class YandexMarketAdapter(MarketplaceAdapter):
                 sales.append({
                     "date": sale_date,
                     "external_sku": shop_sku,
-                    "external_id": str(product.get("marketSku", "")),
+                    "external_id": order_id,
                     "name": product.get("offerName") or product.get("name") or shop_sku,
                     "quantity": quantity,
                     "price": Decimal(str(marketplace_price or buyer_price or 0)),

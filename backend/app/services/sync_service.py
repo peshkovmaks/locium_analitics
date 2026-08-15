@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
 from app.adapters.base import AdapterFactory
@@ -18,12 +19,18 @@ class SyncService:
         self.db = db
 
     async def sync_shop(
-        self, shop: Shop, days_back: int = 1, credentials: Dict[str, Any] | None = None
+        self,
+        shop: Shop,
+        days_back: int = 1,
+        credentials: Dict[str, Any] | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> Dict[str, Any]:
         """Sync all data for a single shop.
 
         credentials can be provided decrypted (e.g. from manual sync) without
         mutating the ORM shop.credentials field.
+        date_from/date_to override days_back when provided (used by initial_sync).
         """
         adapter = AdapterFactory.create(
             shop.marketplace.value,
@@ -38,10 +45,12 @@ class SyncService:
                 "message": "Authentication failed",
             }
 
-        date_from = (datetime.utcnow() - timedelta(days=days_back)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        date_to = datetime.utcnow()
+        if date_from is None:
+            date_from = (datetime.utcnow() - timedelta(days=days_back)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+        if date_to is None:
+            date_to = datetime.utcnow()
 
         results = {
             "shop_id": str(shop.id),
@@ -56,9 +65,8 @@ class SyncService:
         all_items = []
 
         try:
-            # 1. Sync sales — prefer real-time orders over delayed analytics
-            # Remove previous data for the same period to avoid duplicates.
-            await self._clear_sales(shop.id, date_from, date_to)
+            # 1. Sync sales — prefer real-time orders over delayed analytics.
+            # Use PostgreSQL upsert to avoid duplicates across chunk syncs.
             if hasattr(adapter, 'get_orders'):
                 orders = await adapter.get_orders(date_from, date_to)
                 await self._save_orders_as_sales(shop.id, orders)
@@ -134,35 +142,56 @@ class SyncService:
     def _naive_dt(self, value: datetime) -> datetime:
         return value.replace(tzinfo=None) if value and value.tzinfo else value
 
-    async def _save_sales(self, shop_id, sales: List[Dict[str, Any]]):
+    async def _upsert_sales(self, shop_id, sales: List[Dict[str, Any]]):
+        """Upsert sales to avoid duplicates across chunk syncs."""
+        if not sales:
+            return
+
         for item in sales:
-            sale = Sale(
+            date = self._naive_dt(item["date"])
+            external_sku = item["external_sku"]
+            external_id = item.get("external_id") or ""
+            quantity = int(item.get("quantity", 1) or 1)
+            price = Decimal(str(item.get("price", 0) or 0))
+            revenue = Decimal(str(item.get("revenue", price * quantity)))
+            is_return = bool(item.get("is_return", False))
+
+            stmt = insert(Sale).values(
                 shop_id=shop_id,
-                date=self._naive_dt(item["date"]),
-
-                external_sku=item["external_sku"],
-                external_id=item.get("external_id"),
-                quantity=item["quantity"],
-                price=item["price"],
-                revenue=item["revenue"],
-                commission=item.get("commission", Decimal(0)),
-                logistics=item.get("logistics", Decimal(0)),
-                storage=item.get("storage", Decimal(0)),
-                advertising=item.get("advertising", Decimal(0)),
-                returns=item.get("returns", Decimal(0)),
-                other=item.get("other", Decimal(0)),
-                is_return=item.get("is_return", False),
+                date=date,
+                external_sku=external_sku,
+                external_id=external_id,
+                quantity=quantity,
+                price=price,
+                revenue=revenue,
+                commission=Decimal(str(item.get("commission", 0) or 0)),
+                logistics=Decimal(str(item.get("logistics", 0) or 0)),
+                storage=Decimal(str(item.get("storage", 0) or 0)),
+                advertising=Decimal(str(item.get("advertising", 0) or 0)),
+                returns=Decimal(str(item.get("returns", 0) or 0)),
+                other=Decimal(str(item.get("other", 0) or 0)),
+                is_return=is_return,
             )
-            self.db.add(sale)
-
-    async def _clear_sales(self, shop_id, date_from: datetime, date_to: datetime):
-        await self.db.execute(
-            delete(Sale).where(
-                Sale.shop_id == shop_id,
-                Sale.date >= date_from,
-                Sale.date <= date_to + timedelta(days=1),
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["shop_id", "external_id", "external_sku"],
+                set_={
+                    "date": stmt.excluded.date,
+                    "quantity": stmt.excluded.quantity,
+                    "price": stmt.excluded.price,
+                    "revenue": stmt.excluded.revenue,
+                    "commission": stmt.excluded.commission,
+                    "logistics": stmt.excluded.logistics,
+                    "storage": stmt.excluded.storage,
+                    "advertising": stmt.excluded.advertising,
+                    "returns": stmt.excluded.returns,
+                    "other": stmt.excluded.other,
+                    "is_return": stmt.excluded.is_return,
+                },
             )
-        )
+            await self.db.execute(stmt)
+
+    async def _save_sales(self, shop_id, sales: List[Dict[str, Any]]):
+        await self._upsert_sales(shop_id, sales)
 
     async def _clear_stocks(self, shop_id):
         await self.db.execute(delete(Stock).where(Stock.shop_id == shop_id))
@@ -177,28 +206,29 @@ class SyncService:
         )
 
     async def _save_orders_as_sales(self, shop_id, orders: List[Dict[str, Any]]):
-        """Convert real-time orders to sales format."""
+        """Convert real-time orders to sales format and upsert."""
+        sales = []
         for item in orders:
             status = item.get("status", "").upper()
-            is_return = status in ("CANCELLED", "CANCELLED_BY_CUSTOMER", "RETURNED", "PARTIALLY_RETURNED")
-
-            sale = Sale(
-                shop_id=shop_id,
-                date=self._naive_dt(item["date"]),
-                external_sku=item["external_sku"],
-                external_id=item.get("external_id"),
-                quantity=item["quantity"],
-                price=item["price"],
-                revenue=item["price"] * item["quantity"],
-                commission=Decimal(0),
-                logistics=Decimal(0),
-                storage=Decimal(0),
-                advertising=Decimal(0),
-                returns=Decimal(0),
-                other=Decimal(0),
-                is_return=is_return,
+            is_return = status in (
+                "CANCELLED", "CANCELLED_BY_CUSTOMER", "RETURNED", "PARTIALLY_RETURNED"
             )
-            self.db.add(sale)
+            sales.append({
+                "date": item["date"],
+                "external_sku": item["external_sku"],
+                "external_id": item.get("external_id"),
+                "quantity": item.get("quantity", 1),
+                "price": item["price"],
+                "revenue": item["price"] * item.get("quantity", 1),
+                "commission": Decimal(0),
+                "logistics": Decimal(0),
+                "storage": Decimal(0),
+                "advertising": Decimal(0),
+                "returns": Decimal(0),
+                "other": Decimal(0),
+                "is_return": is_return,
+            })
+        await self._upsert_sales(shop_id, sales)
 
     async def _save_stocks(self, shop_id, stocks: List[Dict[str, Any]]):
         for item in stocks:
@@ -317,6 +347,59 @@ class SyncService:
                 sale.storage = item.get("storage", sale.storage)
                 sale.returns = item.get("returns", sale.returns)
                 sale.other = item.get("other", sale.other)
+
+    async def initial_sync(
+        self,
+        shop: Shop,
+        days_back: int = 365,
+        credentials: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Fetch historical sales in API-safe chunks.
+
+        YM: max 30 days per request.
+        Ozon: max 90 days per request for regular sellers.
+        """
+        mp = shop.marketplace.value
+        chunk_days = 30 if mp == "ym" else 90
+
+        overall = {
+            "shop_id": str(shop.id),
+            "marketplace": mp,
+            "status": "success",
+            "chunks": 0,
+            "sales": 0,
+            "errors": [],
+        }
+
+        end = datetime.utcnow()
+        start = (end - timedelta(days=days_back)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+
+        current = start
+        while current < end:
+            chunk_end = min(current + timedelta(days=chunk_days), end)
+            try:
+                result = await self.sync_shop(
+                    shop,
+                    credentials=credentials,
+                    date_from=current,
+                    date_to=chunk_end,
+                )
+                overall["chunks"] += 1
+                overall["sales"] += result.get("sales", 0)
+                if result.get("status") != "success":
+                    overall["errors"].append(result.get("message"))
+            except Exception as e:
+                overall["errors"].append(str(e))
+
+            current = chunk_end
+
+        if overall["errors"]:
+            overall["status"] = "partial" if overall["sales"] > 0 else "error"
+            overall["message"] = "; ".join(overall["errors"])
+
+        return overall
 
     async def sync_all_active_shops(self, days_back: int = 1) -> List[Dict[str, Any]]:
         result = await self.db.execute(

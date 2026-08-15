@@ -114,11 +114,12 @@ class OzonAdapter(MarketplaceAdapter):
 
         for item in fbo_data.get("result", []):
             created_at = self._parse_date(item.get("created_at", ""), date_from)
+            posting_number = str(item.get("posting_number", "") or item.get("id", ""))
             for product in item.get("products", []):
                 orders.append({
                     "date": created_at,
                     "external_sku": str(product.get("offer_id", "")),
-                    "external_id": str(product.get("sku", "")),
+                    "external_id": posting_number,
                     "quantity": product.get("quantity", 1),
                     "price": Decimal(str(product.get("price", "0") or "0")),
                     "status": item.get("status", ""),
@@ -140,11 +141,12 @@ class OzonAdapter(MarketplaceAdapter):
 
         for item in fbs_data.get("result", {}).get("postings", []):
             created_at = self._parse_date(item.get("created_at", ""), date_from)
+            posting_number = str(item.get("posting_number", "") or item.get("id", ""))
             for product in item.get("products", []):
                 orders.append({
                     "date": created_at,
                     "external_sku": str(product.get("offer_id", "")),
-                    "external_id": str(product.get("sku", "")),
+                    "external_id": posting_number,
                     "quantity": product.get("quantity", 1),
                     "price": Decimal(str(product.get("price", "0") or "0")),
                     "status": item.get("status", ""),
