@@ -71,9 +71,13 @@ async def get_dashboard(
     if period == "today":
         start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
     elif period == "7d":
-        start_date = now - timedelta(days=7)
+        start_date = (now - timedelta(days=7)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
     else:
-        start_date = now - timedelta(days=30)
+        start_date = (now - timedelta(days=30)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
 
     # Get sales
     sales_result = await db.execute(
