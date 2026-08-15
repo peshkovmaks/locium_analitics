@@ -179,6 +179,34 @@ class OzonAdapter(MarketplaceAdapter):
                 return []
             raise
 
+    async def get_product_info(self, offer_ids: List[str]) -> Dict[str, str]:
+        """Fetch product names by offer_id from Ozon API.
+
+        Returns a mapping offer_id -> name.
+        """
+        if not offer_ids:
+            return {}
+
+        try:
+            data = await self._post_with_delay(
+                "/v3/product/info/list",
+                {"offer_id": list(set(offer_ids))},
+            )
+
+            result = {}
+            for item in data.get("items", []):
+                offer_id = str(item.get("offer_id", ""))
+                name = item.get("name") or item.get("product_name") or offer_id
+                if offer_id:
+                    result[offer_id] = name
+            return result
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("Ozon /v3/product/info/list returned 404, names unavailable")
+            else:
+                logger.warning("Ozon /v3/product/info/list failed: %s", e)
+            return {}
+
     async def get_adverts(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         logger.warning("Ozon ads skipped: requires Performance API (OAuth). Seller API does not provide campaign endpoints.")
         return []

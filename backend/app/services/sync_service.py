@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.adapters.base import AdapterFactory
 from app.models import Shop, Sale, Stock, Advert, Product, ProductShopMapping
@@ -50,24 +51,26 @@ class SyncService:
             "prices": 0,
         }
 
+        all_items = []
+
         try:
             # 1. Sync sales — prefer real-time orders over delayed analytics
             if hasattr(adapter, 'get_orders'):
                 orders = await adapter.get_orders(date_from, date_to)
                 await self._save_orders_as_sales(shop.id, orders)
-                await self._ensure_products(shop, orders)
+                all_items.extend(orders)
                 results["sales"] = len(orders)
             else:
                 sales = await adapter.get_sales(date_from, date_to)
                 await self._save_sales(shop.id, sales)
-                await self._ensure_products(shop, sales)
+                all_items.extend(sales)
                 results["sales"] = len(sales)
 
             # 2. Sync stocks
             try:
                 stocks = await adapter.get_stocks()
                 await self._save_stocks(shop.id, stocks)
-                await self._ensure_products(shop, stocks)
+                all_items.extend(stocks)
                 results["stocks"] = len(stocks)
             except Exception:
                 results["stocks"] = 0
@@ -83,9 +86,25 @@ class SyncService:
             # 4. Sync prices
             try:
                 prices = await adapter.get_prices()
+                all_items.extend(prices)
                 results["prices"] = len(prices)
             except Exception:
                 results["prices"] = 0
+
+            # Enrich product names when adapter supports it
+            offer_ids = [
+                str(item.get("external_sku", ""))
+                for item in all_items
+                if item.get("external_sku")
+            ]
+            names = {}
+            if offer_ids and hasattr(adapter, "get_product_info"):
+                try:
+                    names = await adapter.get_product_info(offer_ids)
+                except Exception:
+                    names = {}
+
+            await self._ensure_products(shop, all_items, names=names)
 
             # 5. Finance report
             try:
@@ -180,20 +199,23 @@ class SyncService:
             )
             self.db.add(advert)
 
-    async def _ensure_products(self, shop: Shop, items):
+    async def _ensure_products(self, shop: Shop, items, names: Dict[str, str] | None = None):
         """Create Product records for new SKUs with shop mappings."""
+        names = names or {}
         for item in items:
             external_sku = item.get("external_sku")
-            name = item.get("name") or external_sku or "Unknown"
+            name = item.get("name") or names.get(external_sku) or external_sku or "Unknown"
             if not external_sku:
                 continue
 
-            # 1. Check existing mapping
+            # 1. Check existing mapping and eagerly load related product
             mapping_result = await self.db.execute(
-                select(ProductShopMapping).where(
+                select(ProductShopMapping)
+                .where(
                     ProductShopMapping.shop_id == shop.id,
                     ProductShopMapping.external_sku == external_sku,
                 )
+                .options(selectinload(ProductShopMapping.product))
             )
             mapping = mapping_result.scalar_one_or_none()
 

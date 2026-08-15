@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 
-from app.database import engine, Base
+from app.database import Base, get_engine
 from app.routers import auth, dashboard, shops, products
 
 app = FastAPI(
@@ -29,7 +29,7 @@ app.include_router(products.router, prefix="/api/v1", tags=["products"])
 
 @app.on_event("startup")
 async def startup():
-    async with engine.begin() as conn:
+    async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
