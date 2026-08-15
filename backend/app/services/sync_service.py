@@ -200,13 +200,20 @@ class SyncService:
             self.db.add(advert)
 
     async def _ensure_products(self, shop: Shop, items, names: Dict[str, str] | None = None):
-        """Create Product records for new SKUs with shop mappings."""
+        """Create Product records for new SKUs with shop mappings.
+
+        Prefers real names from sales/orders over bare SKUs coming from prices.
+        """
         names = names or {}
         for item in items:
             external_sku = item.get("external_sku")
-            name = item.get("name") or names.get(external_sku) or external_sku or "Unknown"
             if not external_sku:
                 continue
+
+            # Use a real name if available; never downgrade an existing name to a bare SKU.
+            raw_name = item.get("name") or names.get(external_sku)
+            has_real_name = raw_name and raw_name != external_sku
+            fallback_name = external_sku or "Unknown"
 
             # 1. Check existing mapping and eagerly load related product
             mapping_result = await self.db.execute(
@@ -220,8 +227,8 @@ class SyncService:
             mapping = mapping_result.scalar_one_or_none()
 
             if mapping:
-                if mapping.product and mapping.product.name != name:
-                    mapping.product.name = name
+                if has_real_name and mapping.product and mapping.product.name != raw_name:
+                    mapping.product.name = raw_name
                 continue
 
             # 2. Check existing product by canonical_sku or sku
@@ -238,7 +245,7 @@ class SyncService:
                     user_id=shop.user_id,
                     sku=external_sku,
                     canonical_sku=external_sku,
-                    name=name,
+                    name=raw_name if has_real_name else fallback_name,
                     cost_price=Decimal(0),
                     min_price=Decimal(0),
                 )

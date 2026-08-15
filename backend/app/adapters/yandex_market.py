@@ -118,21 +118,39 @@ class YandexMarketAdapter(MarketplaceAdapter):
 
         sales = []
         for item in data.get("result", {}).get("orders", []):
+            order_status = item.get("status", "").upper()
+            order_date = item.get("creationDate", "")
+            try:
+                sale_date = datetime.fromisoformat(order_date.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                sale_date = datetime.utcnow()
+
             for product in item.get("items", []):
+                shop_sku = str(product.get("shopSku", ""))
+                prices = product.get("prices", []) or []
+                buyer_price = next(
+                    (p.get("costPerItem") for p in prices if p.get("type") == "BUYER"), None
+                )
+                marketplace_price = next(
+                    (p.get("costPerItem") for p in prices if p.get("type") == "MARKETPLACE"), None
+                )
+                quantity = int(product.get("count", 1) or 1)
+
                 sales.append({
-                    "date": datetime.fromisoformat(item.get("creationDate", "").replace("Z", "+00:00")),
-                    "external_sku": str(product.get("offerId", "")),
-                    "external_id": str(product.get("shopSku", "")),
-                    "quantity": product.get("count", 1),
-                    "price": Decimal(str(product.get("initialPrice", 0) or 0)),
-                    "revenue": Decimal(str(product.get("buyerPrice", 0) or 0)),
+                    "date": sale_date,
+                    "external_sku": shop_sku,
+                    "external_id": str(product.get("marketSku", "")),
+                    "name": product.get("offerName") or product.get("name") or shop_sku,
+                    "quantity": quantity,
+                    "price": Decimal(str(marketplace_price or buyer_price or 0)),
+                    "revenue": Decimal(str((buyer_price or marketplace_price or 0) * quantity)),
                     "commission": Decimal("0"),
                     "logistics": Decimal("0"),
                     "storage": Decimal("0"),
                     "advertising": Decimal("0"),
                     "returns": Decimal("0"),
                     "other": Decimal("0"),
-                    "is_return": item.get("status", "").upper() == "CANCELLED",
+                    "is_return": order_status in ("CANCELLED", "CANCELLED_BY_CUSTOMER", "RETURNED", "PARTIALLY_RETURNED"),
                 })
         return sales
 
@@ -158,9 +176,11 @@ class YandexMarketAdapter(MarketplaceAdapter):
         for offer in offers:
             stock_entries = offer.get("stocks", [])
             total_qty = sum(s.get("count", 0) for s in stock_entries)
+            shop_sku = str(offer.get("offerId", "") or offer.get("id", "") or offer.get("shopSku", ""))
             stocks.append({
-                "external_sku": str(offer.get("offerId", "")),
-                "external_id": str(offer.get("offerId", "")),
+                "external_sku": shop_sku,
+                "external_id": str(offer.get("marketSku", "") or offer.get("shopSku", "")),
+                "name": offer.get("name") or offer.get("offerName") or shop_sku,
                 "warehouse": stock_entries[0].get("warehouseName", "YM") if stock_entries else "YM",
                 "quantity": total_qty,
                 "in_way": 0,
@@ -212,9 +232,11 @@ class YandexMarketAdapter(MarketplaceAdapter):
         for item in offers:
             price_info = item.get("price", {})
             price_val = price_info.get("value", 0) if isinstance(price_info, dict) else 0
+            shop_sku = str(item.get("offerId", "") or item.get("id", ""))
             prices.append({
-                "external_sku": str(item.get("id", "")),
-                "external_id": str(item.get("marketSku", "")),
+                "external_sku": shop_sku,
+                "external_id": str(item.get("marketSku", "") or item.get("shopSku", "")),
+                "name": item.get("offerName") or item.get("name") or shop_sku,
                 "price": Decimal(str(price_val or 0)),
                 "discount": 0,
             })
