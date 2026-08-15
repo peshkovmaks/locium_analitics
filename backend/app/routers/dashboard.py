@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Dict
 from decimal import Decimal
 
 from app.database import get_db
@@ -184,33 +184,49 @@ async def get_dashboard(
             )
         )
 
-    # Unit economics
+    # Unit economics — aggregate by SKU, use real expenses from Sale
     unit_rows: List[UnitEconomicsRow] = []
+
+    # Group sales by external_sku (and shop, since one SKU belongs to one shop)
+    sku_sales: Dict[tuple, List[Sale]] = {}
     for s in sales:
-        if s.external_sku not in products:
+        key = (s.external_sku, s.shop_id)
+        sku_sales.setdefault(key, []).append(s)
+
+    for (external_sku, shop_id), s_sales in sku_sales.items():
+        if external_sku not in products:
             continue
-        p = products[s.external_sku]
-        shop = next((sh for sh in shops if sh.id == s.shop_id), None)
+        p = products[external_sku]
+        shop = next((sh for sh in shops if sh.id == shop_id), None)
         if not shop:
             continue
         mp = shop.marketplace.value
-        r = EXPENSE_RATIOS.get(mp, EXPENSE_RATIOS["wb"])
-        exp_per_unit = s.price * Decimal(sum(r.values()))
-        net_per = s.price - p.cost_price - exp_per_unit
+
+        total_qty = sum(s.quantity for s in s_sales)
+        total_revenue_sku = sum(s.revenue for s in s_sales)
+        total_expenses_sku = sum(
+            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other
+            for s in s_sales
+        )
+
+        avg_price = (total_revenue_sku / total_qty) if total_qty > 0 else Decimal(0)
+        expense_per_unit = (total_expenses_sku / total_qty) if total_qty > 0 else Decimal(0)
+        net_per = avg_price - p.cost_price - expense_per_unit
+
         unit_rows.append(
             UnitEconomicsRow(
                 sku=p.sku,
                 name=p.name,
                 marketplace=MP_NAMES.get(mp, mp),
-                price=s.price,
+                price=avg_price,
                 cost=p.cost_price,
-                expense_per_unit=exp_per_unit,
+                expense_per_unit=expense_per_unit,
                 net_per_unit=net_per,
-                sales=s.quantity,
-                total_net=net_per * s.quantity,
+                sales=total_qty,
+                total_net=net_per * total_qty,
             )
         )
-    unit_rows.sort(key=lambda x: x.net_per_unit, reverse=True)
+    unit_rows.sort(key=lambda x: x.total_net, reverse=True)
 
     # Product dashboard rows
     product_rows: List[ProductDashboardRow] = []
