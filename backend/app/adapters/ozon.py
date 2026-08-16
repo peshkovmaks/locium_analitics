@@ -1,9 +1,10 @@
 """Ozon Seller API Adapter."""
 
+import os
 import httpx
 import logging
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
 
@@ -26,9 +27,13 @@ class OzonAdapter(MarketplaceAdapter):
             "Content-Type": "application/json",
         }
 
+    def _http_client(self) -> httpx.AsyncClient:
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+        return httpx.AsyncClient(proxy=proxy) if proxy else httpx.AsyncClient()
+
     async def authenticate(self) -> bool:
         try:
-            async with httpx.AsyncClient() as client:
+            async with self._http_client() as client:
                 response = await client.post(
                     f"{self.BASE_URL}/v2/warehouse/list",
                     headers=self.headers,
@@ -42,7 +47,7 @@ class OzonAdapter(MarketplaceAdapter):
     @async_retry(max_retries=3, base_delay=2.0, max_delay=60.0)
     async def _post(self, endpoint: str, data: Optional[Dict] = None) -> Any:
         url = f"{self.BASE_URL}{endpoint}"
-        async with httpx.AsyncClient() as client:
+        async with self._http_client() as client:
             response = await client.post(url, headers=self.headers, json=data or {}, timeout=30.0)
             response.raise_for_status()
             return response.json()
@@ -95,24 +100,64 @@ class OzonAdapter(MarketplaceAdapter):
             })
         return sales
 
+    async def _fetch_postings(
+        self,
+        endpoint: str,
+        date_from: datetime,
+        date_to: datetime,
+        result_key: str,
+    ) -> List[Dict[str, Any]]:
+        """Fetch all postings for one endpoint with pagination.
+
+        Ozon posting endpoints reject date ranges longer than ~90 days, so the
+        request is split into chunks when needed.
+        """
+        chunk_days = 90
+        limit = 1000
+        all_items = []
+
+        current = date_from
+        while current < date_to:
+            chunk_end = min(current + timedelta(days=chunk_days), date_to)
+            offset = 0
+            while True:
+                data = await self._post_with_delay(
+                    endpoint,
+                    {
+                        "dir": "ASC",
+                        "filter": {
+                            "since": current.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                            "to": chunk_end.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        },
+                        "limit": limit,
+                        "offset": offset,
+                        "with": {"analytics_data": True},
+                    },
+                )
+
+                if result_key:
+                    items = data.get("result", {}).get(result_key, [])
+                else:
+                    items = data.get("result", [])
+
+                if not items:
+                    break
+                all_items.extend(items)
+                if len(items) < limit:
+                    break
+                offset += limit
+
+            current = chunk_end
+
+        return all_items
+
     async def get_orders(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         orders = []
 
-        fbo_data = await self._post_with_delay(
-            "/v2/posting/fbo/list",
-            {
-                "dir": "ASC",
-                "filter": {
-                    "since": date_from.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-                    "to": date_to.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-                },
-                "limit": 1000,
-                "offset": 0,
-                "with": {"analytics_data": True},
-            },
+        fbo_items = await self._fetch_postings(
+            "/v2/posting/fbo/list", date_from, date_to, result_key=""
         )
-
-        for item in fbo_data.get("result", []):
+        for item in fbo_items:
             created_at = self._parse_date(item.get("created_at", ""), date_from)
             posting_number = str(item.get("posting_number", "") or item.get("id", ""))
             for product in item.get("products", []):
@@ -125,21 +170,10 @@ class OzonAdapter(MarketplaceAdapter):
                     "status": item.get("status", ""),
                 })
 
-        fbs_data = await self._post_with_delay(
-            "/v3/posting/fbs/list",
-            {
-                "dir": "ASC",
-                "filter": {
-                    "since": date_from.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-                    "to": date_to.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-                },
-                "limit": 1000,
-                "offset": 0,
-                "with": {"analytics_data": True},
-            },
+        fbs_items = await self._fetch_postings(
+            "/v3/posting/fbs/list", date_from, date_to, result_key="postings"
         )
-
-        for item in fbs_data.get("result", {}).get("postings", []):
+        for item in fbs_items:
             created_at = self._parse_date(item.get("created_at", ""), date_from)
             posting_number = str(item.get("posting_number", "") or item.get("id", ""))
             for product in item.get("products", []):
