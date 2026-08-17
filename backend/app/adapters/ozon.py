@@ -64,6 +64,16 @@ class OzonAdapter(MarketplaceAdapter):
         except (ValueError, TypeError):
             return fallback
 
+    def _extract_order_date(self, item: Dict[str, Any], fallback: datetime) -> datetime:
+        """Try several date fields; FBO uses created_at, FBS uses in_process_at."""
+        for key in ("created_at", "in_process_at", "shipment_date", "delivering_date"):
+            value = item.get(key)
+            if value:
+                parsed = self._parse_date(value, fallback)
+                if parsed is not fallback:
+                    return parsed
+        return fallback
+
     async def get_sales(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         data = await self._post_with_delay(
             "/v1/analytics/data",
@@ -158,7 +168,7 @@ class OzonAdapter(MarketplaceAdapter):
             "/v2/posting/fbo/list", date_from, date_to, result_key=""
         )
         for item in fbo_items:
-            created_at = self._parse_date(item.get("created_at", ""), date_from)
+            created_at = self._extract_order_date(item, date_from)
             posting_number = str(item.get("posting_number", "") or item.get("id", ""))
             for product in item.get("products", []):
                 orders.append({
@@ -174,7 +184,7 @@ class OzonAdapter(MarketplaceAdapter):
             "/v3/posting/fbs/list", date_from, date_to, result_key="postings"
         )
         for item in fbs_items:
-            created_at = self._parse_date(item.get("created_at", ""), date_from)
+            created_at = self._extract_order_date(item, date_from)
             posting_number = str(item.get("posting_number", "") or item.get("id", ""))
             for product in item.get("products", []):
                 orders.append({
