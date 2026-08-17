@@ -358,9 +358,12 @@ class SyncService:
 
         YM: max 30 days per request.
         Ozon: max 90 days per request for regular sellers.
+        WB: statistics API is heavily rate-limited, use 30-day chunks.
         """
+        import asyncio
+
         mp = shop.marketplace.value
-        chunk_days = 30 if mp == "ym" else 90
+        chunk_days = 30 if mp in ("ym", "wb") else 90
 
         overall = {
             "shop_id": str(shop.id),
@@ -392,6 +395,10 @@ class SyncService:
                     overall["errors"].append(result.get("message"))
             except Exception as e:
                 overall["errors"].append(str(e))
+                # Cool down before the next chunk to avoid rate-limit cascades
+                await asyncio.sleep(120)
+            finally:
+                await self.db.rollback()
 
             current = chunk_end
 
