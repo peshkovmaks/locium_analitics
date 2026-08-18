@@ -69,4 +69,5 @@ export const shops = {
     api(`/shops/${shopId}/toggle-sync`, {
       method: 'PUT',
     }),
+  syncLogs: (shopId, limit = 1) => api(`/shops/${shopId}/sync-logs?limit=${limit}`),
 };

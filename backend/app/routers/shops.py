@@ -5,8 +5,8 @@ from typing import List
 from uuid import UUID
 
 from app.database import get_db
-from app.models import Shop, User
-from app.schemas import ShopCreate, ShopOut, ShopSyncResult
+from app.models import Shop, User, SyncLog
+from app.schemas import ShopCreate, ShopOut, ShopSyncResult, SyncLogOut
 from app.auth import get_current_user, get_current_admin
 from app.utils.encryption import encrypt_dict, decrypt_dict
 
@@ -81,3 +81,26 @@ async def manual_sync(
     sync_service = SyncService(db)
     result = await sync_service.sync_shop(shop, days_back=1, credentials=decrypted_credentials)
     return result
+
+
+@router.get("/{shop_id}/sync-logs", response_model=List[SyncLogOut])
+async def list_sync_logs(
+    shop_id: UUID,
+    limit: int = 5,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(
+        select(Shop).where(Shop.id == shop_id, Shop.user_id == current_user.id)
+    )
+    shop = result.scalar_one_or_none()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    logs_result = await db.execute(
+        select(SyncLog)
+        .where(SyncLog.shop_id == shop_id)
+        .order_by(SyncLog.created_at.desc())
+        .limit(limit)
+    )
+    return logs_result.scalars().all()

@@ -69,6 +69,24 @@ class Shop(Base):
     adverts = relationship(
         "Advert", back_populates="shop", cascade="all, delete-orphan"
     )
+    sync_logs = relationship(
+        "SyncLog", back_populates="shop", cascade="all, delete-orphan", order_by="desc(SyncLog.created_at)"
+    )
+
+
+class SyncLog(Base):
+    __tablename__ = "sync_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shop_id = Column(
+        UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status = Column(String(20), nullable=False, default="success")
+    sections = Column(JSONB, default=dict)
+    message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    shop = relationship("Shop", back_populates="sync_logs")
 
 
 class Product(Base):

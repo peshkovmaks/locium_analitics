@@ -114,6 +114,18 @@ class ShopSyncResult(BaseModel):
     finance: SyncSectionResult
 
 
+class SyncLogOut(BaseModel):
+    id: UUID
+    shop_id: UUID
+    status: str
+    sections: dict
+    message: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # --- Dashboard ---
 class MarketplaceKPI(BaseModel):
     marketplace: str

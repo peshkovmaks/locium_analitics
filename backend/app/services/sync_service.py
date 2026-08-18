@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
 from app.adapters.base import AdapterFactory
-from app.models import Shop, Sale, Stock, Advert, Product, ProductShopMapping
+from app.models import Shop, Sale, Stock, Advert, Product, ProductShopMapping, SyncLog
 
 
 class SyncService:
@@ -141,6 +141,23 @@ class SyncService:
             await self.db.rollback()
             results["status"] = "error"
             results["message"] = str(e)
+
+        # Persist sync log
+        try:
+            log = SyncLog(
+                shop_id=shop.id,
+                status=results["status"],
+                sections={
+                    k: v for k, v in results.items()
+                    if k in ("orders", "stocks", "adverts", "prices", "finance")
+                },
+                message=results.get("message"),
+            )
+            self.db.add(log)
+            await self.db.commit()
+        except Exception as e:
+            logger.warning("Failed to persist sync log: %s", e)
+            await self.db.rollback()
 
         return results
 

@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -35,7 +36,10 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = "postgresql+asyncpg://mp_user:mp_password@localhost:5432/marketplace_analytics"
+    configuration["sqlalchemy.url"] = os.environ.get(
+        "DATABASE_URL",
+        "postgresql+asyncpg://mp_user:mp_password@localhost:5432/marketplace_analytics",
+    )
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",
