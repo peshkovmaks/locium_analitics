@@ -56,27 +56,30 @@ class SyncService:
             "shop_id": str(shop.id),
             "marketplace": shop.marketplace.value,
             "status": "success",
-            "sales": 0,
-            "stocks": 0,
-            "adverts": 0,
-            "prices": 0,
+            "orders": {"status": "success", "count": 0, "message": None},
+            "stocks": {"status": "success", "count": 0, "message": None},
+            "adverts": {"status": "success", "count": 0, "message": None},
+            "prices": {"status": "success", "count": 0, "message": None},
+            "finance": {"status": "success", "count": 0, "message": None},
         }
 
         all_items = []
 
         try:
             # 1. Sync sales — prefer real-time orders over delayed analytics.
-            # Use PostgreSQL upsert to avoid duplicates across chunk syncs.
-            if hasattr(adapter, 'get_orders'):
-                orders = await adapter.get_orders(date_from, date_to)
-                await self._save_orders_as_sales(shop.id, orders)
-                all_items.extend(orders)
-                results["sales"] = len(orders)
-            else:
-                sales = await adapter.get_sales(date_from, date_to)
-                await self._save_sales(shop.id, sales)
-                all_items.extend(sales)
-                results["sales"] = len(sales)
+            try:
+                if hasattr(adapter, 'get_orders'):
+                    orders = await adapter.get_orders(date_from, date_to)
+                    await self._save_orders_as_sales(shop.id, orders)
+                    all_items.extend(orders)
+                    results["orders"] = {"status": "success", "count": len(orders), "message": None}
+                else:
+                    sales = await adapter.get_sales(date_from, date_to)
+                    await self._save_sales(shop.id, sales)
+                    all_items.extend(sales)
+                    results["orders"] = {"status": "success", "count": len(sales), "message": None}
+            except Exception as e:
+                results["orders"] = {"status": "error", "count": 0, "message": str(e)}
 
             # 2. Sync stocks
             try:
@@ -84,26 +87,26 @@ class SyncService:
                 stocks = await adapter.get_stocks()
                 await self._save_stocks(shop.id, stocks)
                 all_items.extend(stocks)
-                results["stocks"] = len(stocks)
-            except Exception:
-                results["stocks"] = 0
+                results["stocks"] = {"status": "success", "count": len(stocks), "message": None}
+            except Exception as e:
+                results["stocks"] = {"status": "error", "count": 0, "message": str(e)}
 
             # 3. Sync adverts
             try:
                 await self._clear_adverts(shop.id, date_from, date_to)
                 adverts = await adapter.get_adverts(date_from, date_to)
                 await self._save_adverts(shop.id, adverts)
-                results["adverts"] = len(adverts)
-            except Exception:
-                results["adverts"] = 0
+                results["adverts"] = {"status": "success", "count": len(adverts), "message": None}
+            except Exception as e:
+                results["adverts"] = {"status": "error", "count": 0, "message": str(e)}
 
             # 4. Sync prices
             try:
                 prices = await adapter.get_prices()
                 all_items.extend(prices)
-                results["prices"] = len(prices)
-            except Exception:
-                results["prices"] = 0
+                results["prices"] = {"status": "success", "count": len(prices), "message": None}
+            except Exception as e:
+                results["prices"] = {"status": "error", "count": 0, "message": str(e)}
 
             # Enrich product names when adapter supports it
             offer_ids = [
@@ -125,9 +128,11 @@ class SyncService:
                 finance = await adapter.get_finance_report(date_from, date_to)
                 if finance:
                     await self._update_finance_data(shop.id, finance, date_from, date_to)
-                    results["finance_records"] = len(finance)
+                    results["finance"] = {"status": "success", "count": len(finance), "message": None}
+                else:
+                    results["finance"] = {"status": "success", "count": 0, "message": "No finance data"}
             except Exception as e:
-                results["finance_error"] = str(e)
+                results["finance"] = {"status": "error", "count": 0, "message": str(e)}
 
             shop.last_sync_at = datetime.utcnow()
             await self.db.commit()

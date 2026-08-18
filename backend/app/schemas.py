@@ -95,6 +95,25 @@ class ShopOut(BaseModel):
         from_attributes = True
 
 
+# --- Sync ---
+class SyncSectionResult(BaseModel):
+    status: str  # "success" | "error" | "skipped"
+    count: int = 0
+    message: Optional[str] = None
+
+
+class ShopSyncResult(BaseModel):
+    shop_id: str
+    marketplace: str
+    status: str
+    message: Optional[str] = None
+    orders: SyncSectionResult
+    stocks: SyncSectionResult
+    adverts: SyncSectionResult
+    prices: SyncSectionResult
+    finance: SyncSectionResult
+
+
 # --- Dashboard ---
 class MarketplaceKPI(BaseModel):
     marketplace: str

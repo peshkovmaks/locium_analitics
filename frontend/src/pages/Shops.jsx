@@ -92,20 +92,37 @@ export default function Shops() {
 
       {syncResult && (
         <div
-          className={`border px-4 py-3 rounded-lg text-sm ${
+          className={`border px-4 py-4 rounded-lg text-sm ${
             syncResult.status === 'success'
               ? 'bg-green-50 border-green-500 text-green-700'
               : 'bg-red-50 border-red-500 text-red-700'
           }`}
         >
-          <div className="font-medium">{syncResult.shop}</div>
-          <div className="mt-1">
-            Статус: {syncResult.status}
-            {syncResult.sales !== undefined && ` · Заказов: ${syncResult.sales}`}
-            {syncResult.stocks !== undefined && ` · Остатков: ${syncResult.stocks}`}
-            {syncResult.adverts !== undefined && ` · Рекламы: ${syncResult.adverts}`}
-            {syncResult.finance_records !== undefined && ` · Фин. записей: ${syncResult.finance_records}`}
-            {syncResult.message && <div className="mt-1">{syncResult.message}</div>}
+          <div className="font-medium text-base">{syncResult.shop}</div>
+          <div className="mt-1">Общий статус: {syncResult.status}</div>
+          {syncResult.message && <div className="mt-1">{syncResult.message}</div>}
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+            {[
+              { key: 'orders', label: 'Заказы' },
+              { key: 'stocks', label: 'Остатки' },
+              { key: 'adverts', label: 'Реклама' },
+              { key: 'prices', label: 'Цены' },
+              { key: 'finance', label: 'Расходы' },
+            ].map(({ key, label }) => {
+              const section = syncResult.sections?.[key] || syncResult[key] || { status: 'unknown', count: 0, message: '' };
+              const isSuccess = section.status === 'success';
+              const isError = section.status === 'error';
+              return (
+                <div key={key} className="bg-white border rounded-lg px-3 py-2">
+                  <div className="text-xs text-gray-500">{label}</div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className={`w-2 h-2 rounded-full ${isSuccess ? 'bg-green-500' : isError ? 'bg-red-500' : 'bg-gray-400'}`} />
+                    <span className="font-medium text-gray-900">{section.count}</span>
+                  </div>
+                  {section.message && <div className="text-xs text-gray-500 mt-1 truncate" title={section.message}>{section.message}</div>}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from app.database import get_db
 from app.models import Shop, User
-from app.schemas import ShopCreate, ShopOut
+from app.schemas import ShopCreate, ShopOut, ShopSyncResult
 from app.auth import get_current_user, get_current_admin
 from app.utils.encryption import encrypt_dict, decrypt_dict
 
@@ -61,7 +61,7 @@ async def toggle_sync(
     return shop
 
 
-@router.post("/{shop_id}/sync")
+@router.post("/{shop_id}/sync", response_model=ShopSyncResult)
 async def manual_sync(
     shop_id: UUID,
     db: AsyncSession = Depends(get_db),
