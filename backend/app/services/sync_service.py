@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
@@ -353,22 +353,70 @@ class SyncService:
     async def _update_finance_data(
         self, shop_id, finance: List[Dict[str, Any]], date_from: datetime, date_to: datetime
     ):
+        """Distribute posting-level expenses across the SKU rows of that posting.
+
+        Finance data from Ozon is keyed by posting_number (``external_id`` in the
+        ``sales`` table). The same posting can contain several products, so we
+        split each expense category proportionally by SKU revenue.
+
+        Expense columns are reset before each sync so repeated runs do not double
+        count the same transactions.
+        """
+        if not finance:
+            return
+
+        await self.db.execute(
+            update(Sale)
+            .where(
+                Sale.shop_id == shop_id,
+                Sale.date >= date_from,
+                Sale.date <= date_to,
+            )
+            .values(
+                commission=Decimal("0"),
+                logistics=Decimal("0"),
+                storage=Decimal("0"),
+                advertising=Decimal("0"),
+                returns=Decimal("0"),
+                other=Decimal("0"),
+            )
+        )
+
         for item in finance:
+            posting_number = item.get("external_id") or item.get("posting_number")
+            if not posting_number:
+                continue
+
             result = await self.db.execute(
                 select(Sale).where(
                     Sale.shop_id == shop_id,
-                    Sale.external_sku == item["external_sku"],
+                    Sale.external_id == posting_number,
                     Sale.date >= date_from,
                     Sale.date <= date_to,
                 )
             )
             sales = result.scalars().all()
+            if not sales:
+                continue
+
+            total_revenue = sum((sale.revenue or Decimal(0)) for sale in sales)
+            if total_revenue <= 0:
+                # No revenue to proportion against; put everything on the first row.
+                weights = {id(sales[0]): Decimal(1)} if sales else {}
+            else:
+                weights = {
+                    id(sale): (sale.revenue or Decimal(0)) / total_revenue
+                    for sale in sales
+                }
+
             for sale in sales:
-                sale.commission = item.get("commission", sale.commission)
-                sale.logistics = item.get("logistics", sale.logistics)
-                sale.storage = item.get("storage", sale.storage)
-                sale.returns = item.get("returns", sale.returns)
-                sale.other = item.get("other", sale.other)
+                weight = weights.get(id(sale), Decimal(0))
+                sale.commission += Decimal(str(item.get("commission", 0) or 0)) * weight
+                sale.logistics += Decimal(str(item.get("logistics", 0) or 0)) * weight
+                sale.storage += Decimal(str(item.get("storage", 0) or 0)) * weight
+                sale.advertising += Decimal(str(item.get("advertising", 0) or 0)) * weight
+                sale.returns += Decimal(str(item.get("returns", 0) or 0)) * weight
+                sale.other += Decimal(str(item.get("other", 0) or 0)) * weight
 
     async def initial_sync(
         self,

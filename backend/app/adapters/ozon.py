@@ -330,33 +330,117 @@ class OzonAdapter(MarketplaceAdapter):
             raise
 
     async def get_finance_report(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
-        try:
+        """Fetch transactions from Ozon and group expenses by posting number.
+
+        Ozon /v3/finance/transaction/list returns accruals that match the
+        Finance → Accruals section in the seller dashboard. We map each
+        operation to an expense category and later distribute the amounts
+        across the SKU rows of the same posting number.
+        """
+        page = 1
+        page_size = 1000
+        operations = []
+
+        while True:
             data = await self._post_with_delay(
-                "/v1/finance/realization",
+                "/v3/finance/transaction/list",
                 {
-                    "date_from": date_from.strftime("%Y-%m-%d"),
-                    "date_to": date_to.strftime("%Y-%m-%d"),
+                    "filter": {
+                        "date": {
+                            "from": date_from.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                            "to": date_to.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        },
+                        "operation_type": [],
+                        "posting_number": "",
+                        "transaction_type": "all",
+                    },
+                    "page": page,
+                    "page_size": page_size,
                 },
             )
+            result = data.get("result", {})
+            ops = result.get("operations", [])
+            operations.extend(ops)
+            page_count = result.get("page_count", 1)
+            if page >= page_count or not ops:
+                break
+            page += 1
 
-            reports = []
-            for item in data.get("realization", []):
-                reports.append({
-                    "date": datetime.strptime(item.get("date", ""), "%Y-%m-%d") if item.get("date") else date_from,
-                    "external_sku": str(item.get("offer_id", "")),
-                    "external_id": str(item.get("sku", "")),
-                    "quantity": item.get("quantity", 0),
-                    "price": Decimal(str(item.get("price", 0))),
-                    "revenue": Decimal(str(item.get("amount", 0))),
-                    "commission": Decimal(str(item.get("commission", 0))),
-                    "logistics": Decimal(str(item.get("logistics", 0))),
-                    "storage": Decimal(str(item.get("storage", 0))),
-                    "returns": Decimal(str(item.get("returns", 0))),
-                    "other": Decimal(str(item.get("other", 0))),
+        logger.info("Ozon transactions fetched: %d operations", len(operations))
+
+        expenses_by_posting: Dict[str, Dict[str, Decimal]] = {}
+
+        def service_amount_by_name(services: List[Dict[str, Any]], *keywords: str) -> Decimal:
+            total = Decimal("0")
+            for service in services or []:
+                name = (service.get("name") or "").lower()
+                if any(kw in name for kw in keywords):
+                    price = Decimal(str(service.get("price", 0) or 0))
+                    total += abs(price)
+            return total
+
+        for op in operations:
+            op_type = (op.get("operation_type") or "").lower()
+            name = (op.get("operation_type_name") or "").lower()
+            amount = Decimal(str(op.get("amount", 0) or 0))
+            posting = op.get("posting") or {}
+            posting_number = str(posting.get("posting_number", ""))
+            services = op.get("services") or []
+
+            # Delivery to customer: commission and logistics are broken out
+            # in sale_commission and services. ``amount`` itself is usually
+            # positive (net payout) and must not be treated as an expense.
+            if op_type == "operationagentdeliveredtocustomer":
+                if not posting_number:
+                    continue
+                bucket = expenses_by_posting.setdefault(posting_number, {
+                    "commission": Decimal("0"),
+                    "logistics": Decimal("0"),
+                    "storage": Decimal("0"),
+                    "advertising": Decimal("0"),
+                    "returns": Decimal("0"),
+                    "other": Decimal("0"),
                 })
-            return reports
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                logger.warning("Ozon /v1/finance/realization returned 404, skipping finance")
-                return []
-            raise
+                bucket["commission"] += abs(Decimal(str(op.get("sale_commission", 0) or 0)))
+                bucket["logistics"] += service_amount_by_name(
+                    services,
+                    "logistic", "lastmile", "handoverplace", "deliverytohandover",
+                )
+                bucket["returns"] += service_amount_by_name(services, "return")
+                bucket["storage"] += service_amount_by_name(services, "storage")
+                bucket["advertising"] += service_amount_by_name(services, "advert", "marketing")
+                continue
+
+            # Skip accruals that are not expenses (positive amount, no posting).
+            if amount >= 0:
+                continue
+
+            # For postings without a number, we currently cannot reliably map
+            # SKU-level charges (e.g. insurance) to our sales rows, so skip them.
+            if not posting_number:
+                continue
+
+            bucket = expenses_by_posting.setdefault(posting_number, {
+                "commission": Decimal("0"),
+                "logistics": Decimal("0"),
+                "storage": Decimal("0"),
+                "advertising": Decimal("0"),
+                "returns": Decimal("0"),
+                "other": Decimal("0"),
+            })
+
+            if op_type in ("clientreturnagentoperation", "operationreturngoodsfbsofrms") or "return" in name:
+                bucket["returns"] += abs(amount)
+            elif op_type in ("marketplacemarketingactioncostoperation",) or "marketing" in name or "реклама" in name:
+                bucket["advertising"] += abs(amount)
+            else:
+                # Acquiring, insurance, compensations and any other charges.
+                bucket["other"] += abs(amount)
+
+        return [
+            {
+                "external_id": posting_number,
+                **amounts,
+            }
+            for posting_number, amounts in expenses_by_posting.items()
+        ]
