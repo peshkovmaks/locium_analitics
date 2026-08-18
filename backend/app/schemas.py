@@ -96,6 +96,14 @@ class ShopOut(BaseModel):
 
 
 # --- Dashboard ---
+class MarketplaceKPI(BaseModel):
+    marketplace: str
+    revenue: Decimal
+    gross_profit: Decimal
+    net_profit: Decimal
+    drr: Decimal
+
+
 class KPIData(BaseModel):
     revenue: Decimal
     gross_profit: Decimal
@@ -105,6 +113,7 @@ class KPIData(BaseModel):
     gross_wow: float
     net_wow: float
     drr_wow: float
+    by_marketplace: List[MarketplaceKPI]
 
 
 class MarketplaceComparison(BaseModel):

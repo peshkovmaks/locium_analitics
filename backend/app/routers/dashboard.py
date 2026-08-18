@@ -12,6 +12,7 @@ from app.models import User, Shop, Product, Sale, Stock, Advert, Marketplace
 from app.schemas import (
     DashboardData,
     KPIData,
+    MarketplaceKPI,
     AlertItem,
     MarketplaceComparison,
     UnitEconomicsRow,
@@ -154,6 +155,39 @@ async def get_dashboard(
     total_net = total_gross - total_cost
     drr = (total_ads / total_revenue * 100) if total_revenue > 0 else Decimal(0)
 
+    # Calculate KPI breakdown by marketplace
+    kpi_by_marketplace: List[MarketplaceKPI] = []
+    for shop in shops:
+        mp = shop.marketplace.value
+        mp_sales = [s for s in sales if s.shop_id == shop.id]
+        mp_returns = [r for r in returns if r.shop_id == shop.id]
+        mp_adverts = [a for a in adverts if a.shop_id == shop.id]
+
+        mp_revenue = sum(s.revenue for s in mp_sales) - sum(r.revenue for r in mp_returns)
+        mp_expenses = sum(
+            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other
+            for s in mp_sales
+        )
+        mp_ads = sum(a.spend for a in mp_adverts)
+        mp_gross = mp_revenue - mp_expenses
+        mp_cost = sum(
+            products[s.external_sku].cost_price * s.quantity
+            for s in mp_sales
+            if s.external_sku in products
+        )
+        mp_net = mp_gross - mp_cost
+        mp_drr = (mp_ads / mp_revenue * 100) if mp_revenue > 0 else Decimal(0)
+
+        kpi_by_marketplace.append(
+            MarketplaceKPI(
+                marketplace=MP_NAMES.get(mp, mp),
+                revenue=mp_revenue,
+                gross_profit=mp_gross,
+                net_profit=mp_net,
+                drr=mp_drr,
+            )
+        )
+
     # Mock WoW (in production: compare with previous period)
     kpi = KPIData(
         revenue=total_revenue,
@@ -164,6 +198,7 @@ async def get_dashboard(
         gross_wow=5.0,
         net_wow=-3.0,
         drr_wow=-1.2,
+        by_marketplace=kpi_by_marketplace,
     )
 
     # Alerts
