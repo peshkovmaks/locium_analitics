@@ -353,11 +353,13 @@ class SyncService:
     async def _update_finance_data(
         self, shop_id, finance: List[Dict[str, Any]], date_from: datetime, date_to: datetime
     ):
-        """Distribute posting-level expenses across the SKU rows of that posting.
+        """Distribute finance-level expenses across matching sales rows.
 
-        Finance data from Ozon is keyed by posting_number (``external_id`` in the
-        ``sales`` table). The same posting can contain several products, so we
-        split each expense category proportionally by SKU revenue.
+        Ozon finance data is keyed by posting_number (``external_id``). Yandex
+        Market finance data is keyed by shop SKU (``external_sku``). When a
+        posting contains several products we split amounts proportionally by SKU
+        revenue; for SKU-level reports the amount is attached directly to all
+        matching sales rows.
 
         Expense columns are reset before each sync so repeated runs do not double
         count the same transactions.
@@ -384,18 +386,32 @@ class SyncService:
 
         for item in finance:
             posting_number = item.get("external_id") or item.get("posting_number")
-            if not posting_number:
+            sku = item.get("external_sku")
+
+            if posting_number:
+                result = await self.db.execute(
+                    select(Sale).where(
+                        Sale.shop_id == shop_id,
+                        Sale.external_id == posting_number,
+                        Sale.date >= date_from,
+                        Sale.date <= date_to,
+                    )
+                )
+                sales = result.scalars().all()
+            elif sku:
+                # Yandex Market finance report is keyed by shop SKU.
+                result = await self.db.execute(
+                    select(Sale).where(
+                        Sale.shop_id == shop_id,
+                        Sale.external_sku == sku,
+                        Sale.date >= date_from,
+                        Sale.date <= date_to,
+                    )
+                )
+                sales = result.scalars().all()
+            else:
                 continue
 
-            result = await self.db.execute(
-                select(Sale).where(
-                    Sale.shop_id == shop_id,
-                    Sale.external_id == posting_number,
-                    Sale.date >= date_from,
-                    Sale.date <= date_to,
-                )
-            )
-            sales = result.scalars().all()
             if not sales:
                 continue
 

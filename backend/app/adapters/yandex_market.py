@@ -19,7 +19,10 @@ import csv
 import httpx
 import io
 import logging
+import re
 import time
+import xml.etree.ElementTree as ET
+import zipfile
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
@@ -338,7 +341,12 @@ class YandexMarketAdapter(MarketplaceAdapter):
         return await self._download_and_parse_ym_report(file_url)
 
     async def _download_and_parse_ym_report(self, file_url: str) -> List[Dict[str, Any]]:
-        """Download YM report file and aggregate expenses by SKU."""
+        """Download YM unified marketplace services report and aggregate expenses by SKU.
+
+        Yandex Market returns the report as an XLSX file (a ZIP archive containing
+        several XML worksheets). We parse the XML directly to avoid an extra
+        dependency on openpyxl/pandas.
+        """
         try:
             async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client:
                 response = await client.get(file_url)
@@ -348,73 +356,95 @@ class YandexMarketAdapter(MarketplaceAdapter):
             logger.warning("YM report download failed: %s", e)
             return []
 
-        content_type = response.headers.get("content-type", "")
-        if "zip" in content_type or content.startswith(b"PK"):
-            logger.warning("YM report is a ZIP archive; parsing not implemented")
-            return []
-
-        # Try CSV parsing
-        try:
-            text = content.decode("utf-8")
-        except UnicodeDecodeError:
-            text = content.decode("cp1251", errors="replace")
-
-        reader = csv.DictReader(io.StringIO(text), delimiter=";")
-        if not reader.fieldnames:
-            logger.warning("YM report CSV has no headers")
-            return []
-
-        # Defensive column name normalization
-        headers = [h.strip().upper() for h in reader.fieldnames]
-        header_map = {h: orig for h, orig in zip(headers, reader.fieldnames)}
-
-        def col(*names):
-            for name in names:
-                n = name.upper()
-                if n in header_map:
-                    return header_map[n]
-            return None
-
-        sku_col = col("SHOP_SKU", "SKU")
-        price_col = col("SERVICE_PRICE", "TOTAL_AMOUNT", "AMOUNT", "TOTAL")
-        service_col = col("SERVICE_NAME", "SERVICE")
-        order_col = col("ORDER_ID")
-
-        if not sku_col or not price_col:
-            logger.warning("YM report CSV missing required columns; headers: %s", headers)
+        if not content.startswith(b"PK"):
+            logger.warning("YM report is not an XLSX/ZIP archive; cannot parse")
             return []
 
         aggregated: Dict[str, Dict[str, Decimal]] = {}
-        for row in reader:
-            sku = str(row.get(sku_col, "")).strip()
-            if not sku:
-                continue
-            try:
-                price = Decimal(str(row.get(price_col, "0") or "0").replace(",", "."))
-            except Exception:
-                continue
-            service_name = str(row.get(service_col, "")).lower() if service_col else ""
+        sheet_categories = {
+            "размещение товара": "commission",
+            "размещение товаров и услуг": "commission",
+            "буст продаж": "advertising",
+            "доставка покупателю": "logistics",
+            "приём платежа покупателя": "other",
+            "перевод платежа покупателя": "other",
+        }
 
-            if sku not in aggregated:
-                aggregated[sku] = {
-                    "commission": Decimal(0),
-                    "logistics": Decimal(0),
-                    "storage": Decimal(0),
-                    "returns": Decimal(0),
-                    "other": Decimal(0),
-                }
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as z:
+                sheet_names = self._read_sheet_names(z)
+                for sheet_file in z.namelist():
+                    if not sheet_file.startswith("xl/worksheets/sheet") or not sheet_file.endswith(".xml"):
+                        continue
 
-            # Categorize by service name keywords
-            if any(k in service_name for k in ("commission", "sale", "продажа")):
-                aggregated[sku]["commission"] += price
-            elif any(k in service_name for k in ("delivery", "logistics", "shipment", "доставка", "логистика")):
-                aggregated[sku]["logistics"] += price
-            elif any(k in service_name for k in ("storage", "хранение")):
-                aggregated[sku]["storage"] += price
-            elif any(k in service_name for k in ("return", "возврат")):
-                aggregated[sku]["returns"] += price
-            else:
-                aggregated[sku]["other"] += price
+                    rows = self._parse_xlsx_sheet(z, sheet_file)
+                    if not rows:
+                        continue
+
+                    # Find header row
+                    header_row_index = None
+                    header_map: Dict[str, int] = {}
+                    for idx, row in enumerate(rows):
+                        cells = [str(c).strip().lower() for c in row]
+                        if "ваш sku" in cells or "ваш sku" in " ".join(cells):
+                            header_row_index = idx
+                            header_map = {c: i for i, c in enumerate(cells) if c}
+                            break
+
+                    if not header_row_index:
+                        continue
+
+                    sku_idx = self._find_col(header_map, "ваш sku")
+                    amount_idx = self._find_col(header_map, "стоимость услуги")
+                    service_idx = self._find_col(header_map, "услуга")
+                    if sku_idx is None or amount_idx is None:
+                        continue
+
+                    # Determine default category by sheet title when service column
+                    # is missing; otherwise each row's service name decides.
+                    default_category = None
+                    for title_row in rows[:2]:
+                        title_text = " ".join(str(c) for c in title_row if c).lower()
+                        for key, cat in sheet_categories.items():
+                            if key in title_text:
+                                default_category = cat
+                                break
+                        if default_category:
+                            break
+
+                    for row in rows[header_row_index + 1:]:
+                        if sku_idx >= len(row):
+                            continue
+                        sku = str(row[sku_idx]).strip()
+                        if not sku:
+                            continue
+
+                        try:
+                            amount = Decimal(str(row[amount_idx] if amount_idx < len(row) else "0").replace(",", "."))
+                        except Exception:
+                            continue
+
+                        category = default_category
+                        if service_idx is not None and service_idx < len(row):
+                            service_name = str(row[service_idx]).lower()
+                            category = self._categorize_ym_service(service_name, sheet_categories)
+
+                        if not category:
+                            continue
+
+                        if sku not in aggregated:
+                            aggregated[sku] = {
+                                "commission": Decimal("0"),
+                                "logistics": Decimal("0"),
+                                "storage": Decimal("0"),
+                                "advertising": Decimal("0"),
+                                "returns": Decimal("0"),
+                                "other": Decimal("0"),
+                            }
+                        aggregated[sku][category] += amount
+        except Exception as e:
+            logger.warning("YM XLSX parsing failed: %s", e)
+            return []
 
         reports = []
         for sku, amounts in aggregated.items():
@@ -423,10 +453,125 @@ class YandexMarketAdapter(MarketplaceAdapter):
                 "external_sku": sku,
                 "external_id": "",
                 "quantity": 0,
-                "price": Decimal(0),
-                "revenue": Decimal(0),
+                "price": Decimal("0"),
+                "revenue": Decimal("0"),
                 **amounts,
             })
 
         logger.info("YM finance report parsed: %s SKU expense records", len(reports))
         return reports
+
+    def _read_sheet_names(self, z: zipfile.ZipFile) -> Dict[str, str]:
+        """Map sheet file names to human-readable sheet names from workbook.xml."""
+        names: Dict[str, str] = {}
+        try:
+            xml = z.read("xl/workbook.xml").decode("utf-8", errors="replace")
+            root = ET.fromstring(xml)
+            ns = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+            for sheet in root.findall(".//main:sheet", ns):
+                name = sheet.get("name", "")
+                sheet_id = sheet.get("sheetId", "")
+                if sheet_id:
+                    names[f"xl/worksheets/sheet{sheet_id}.xml"] = name
+        except Exception as e:
+            logger.warning("Could not read YM workbook sheet names: %s", e)
+        return names
+
+    def _parse_xlsx_sheet(self, z: zipfile.ZipFile, sheet_file: str) -> List[List[Any]]:
+        """Parse an XLSX worksheet XML into rows of cell values."""
+        try:
+            xml = z.read(sheet_file).decode("utf-8", errors="replace")
+        except Exception:
+            return []
+
+        ns = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        try:
+            root = ET.fromstring(xml)
+        except ET.ParseError:
+            return []
+
+        def col_index(col: str) -> int:
+            idx = 0
+            for ch in col:
+                idx = idx * 26 + (ord(ch) - ord("A") + 1)
+            return idx - 1
+
+        rows: Dict[int, Dict[int, Any]] = {}
+        for row in root.findall(".//main:row", ns):
+            row_num = int(row.get("r", 0))
+            cells: Dict[int, Any] = {}
+            for c in row.findall("main:c", ns):
+                ref = c.get("r", "")
+                match = re.match(r"([A-Z]+)", ref)
+                if not match:
+                    continue
+                col = match.group(1)
+                idx = col_index(col)
+                cell_type = c.get("t", "")
+                value = ""
+
+                inline = c.find("main:is/main:t", ns)
+                if inline is not None:
+                    value = inline.text or ""
+                else:
+                    v = c.find("main:v", ns)
+                    if v is not None:
+                        text = v.text or ""
+                        if cell_type == "n":
+                            try:
+                                value = float(text)
+                            except ValueError:
+                                value = text
+                        else:
+                            value = text
+                cells[idx] = value
+            if cells:
+                rows[row_num] = cells
+
+        if not rows:
+            return []
+
+        max_row = max(rows.keys())
+        max_col = max(max(cells.keys()) for cells in rows.values())
+        return [
+            [rows.get(r, {}).get(c, "") for c in range(max_col + 1)]
+            for r in range(1, max_row + 1)
+        ]
+
+    def _find_col(self, header_map: Dict[str, int], *names: str) -> Optional[int]:
+        """Find column index by one of the Russian header names.
+
+        Prefers exact matches and the final amount column to avoid picking
+        intermediate columns like "Стоимость услуги без учёта ограничений
+        тарифа" instead of "Стоимость услуги (AX = ...), ₽".
+        """
+        for name in names:
+            # Exact match first
+            for header, idx in header_map.items():
+                if header.strip().rstrip(",₽") == name:
+                    return idx
+            # Exact match ignoring currency suffix
+            for header, idx in header_map.items():
+                clean = header.replace(", ₽", "").replace("₽", "").strip()
+                if clean == name:
+                    return idx
+            # Final amount column: contains the name and a currency suffix,
+            # and does not describe an intermediate calculation.
+            for header, idx in header_map.items():
+                if name in header and "₽" in header and not any(
+                    k in header for k in ("без", "учёта", "ограничений", "мин.", "максимальный")
+                ):
+                    return idx
+            # Fallback to substring
+            for header, idx in header_map.items():
+                if name in header:
+                    return idx
+        return None
+
+    def _categorize_ym_service(self, service_name: str, mapping: Dict[str, str]) -> Optional[str]:
+        """Map a Yandex Market service name to an expense category."""
+        lowered = service_name.lower()
+        for key, category in mapping.items():
+            if key in lowered:
+                return category
+        return None
