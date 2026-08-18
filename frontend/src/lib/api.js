@@ -58,3 +58,15 @@ export const products = {
       body: JSON.stringify({ source_skus: sourceSkus, target_sku: targetSku }),
     }),
 };
+
+export const shops = {
+  list: () => api('/shops/'),
+  sync: (shopId) =>
+    api(`/shops/${shopId}/sync`, {
+      method: 'POST',
+    }),
+  toggleSync: (shopId) =>
+    api(`/shops/${shopId}/toggle-sync`, {
+      method: 'PUT',
+    }),
+};

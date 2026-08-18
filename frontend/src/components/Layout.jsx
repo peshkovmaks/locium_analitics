@@ -56,6 +56,7 @@ export default function Layout({ children }) {
             <nav className="flex items-center gap-2">
               {navLink('/', 'Дашборд')}
               {navLink('/products', 'Товары')}
+              {navLink('/shops', 'Магазины')}
             </nav>
             <div className="flex items-center gap-3">
               {user && (
