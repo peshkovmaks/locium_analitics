@@ -161,6 +161,37 @@ class OzonAdapter(MarketplaceAdapter):
 
         return all_items
 
+    def _extract_posting_expenses(self, item: Dict[str, Any], product: Dict[str, Any]) -> Dict[str, Decimal]:
+        """Extract per-product expenses from Ozon posting analytics_data."""
+        analytics = item.get("analytics_data") or {}
+        financial = analytics.get("financial_data") or {}
+
+        # Find product-specific financial row by sku/offer_id if present
+        offer_id = str(product.get("offer_id", ""))
+        product_financial = None
+        for fp in financial.get("products", []) or []:
+            if str(fp.get("offer_id", "")) == offer_id or str(fp.get("sku", "")) == offer_id:
+                product_financial = fp
+                break
+
+        def get(*keys):
+            for src in ([product_financial] if product_financial else []) + [financial, analytics]:
+                if not src:
+                    continue
+                for key in keys:
+                    val = src.get(key)
+                    if val is not None:
+                        return Decimal(str(val))
+            return Decimal(0)
+
+        return {
+            "commission": get("commission_amount", "commission"),
+            "logistics": get("delivery_rub", "delivery_amount", "logistics_amount", "logistics"),
+            "storage": get("storage_amount", "storage"),
+            "returns": get("return_amount", "returns", "refund_amount"),
+            "other": get("picking_amount", "price_service_amount", "acquiring_amount", "other"),
+        }
+
     async def get_orders(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         orders = []
 
@@ -171,13 +202,18 @@ class OzonAdapter(MarketplaceAdapter):
             created_at = self._extract_order_date(item, date_from)
             posting_number = str(item.get("posting_number", "") or item.get("id", ""))
             for product in item.get("products", []):
+                expenses = self._extract_posting_expenses(item, product)
+                quantity = product.get("quantity", 1)
+                price = Decimal(str(product.get("price", "0") or "0"))
                 orders.append({
                     "date": created_at,
                     "external_sku": str(product.get("offer_id", "")),
                     "external_id": posting_number,
-                    "quantity": product.get("quantity", 1),
-                    "price": Decimal(str(product.get("price", "0") or "0")),
+                    "quantity": quantity,
+                    "price": price,
+                    "revenue": price * quantity,
                     "status": item.get("status", ""),
+                    **expenses,
                 })
 
         fbs_items = await self._fetch_postings(
@@ -187,13 +223,18 @@ class OzonAdapter(MarketplaceAdapter):
             created_at = self._extract_order_date(item, date_from)
             posting_number = str(item.get("posting_number", "") or item.get("id", ""))
             for product in item.get("products", []):
+                expenses = self._extract_posting_expenses(item, product)
+                quantity = product.get("quantity", 1)
+                price = Decimal(str(product.get("price", "0") or "0"))
                 orders.append({
                     "date": created_at,
                     "external_sku": str(product.get("offer_id", "")),
                     "external_id": posting_number,
-                    "quantity": product.get("quantity", 1),
-                    "price": Decimal(str(product.get("price", "0") or "0")),
+                    "quantity": quantity,
+                    "price": price,
+                    "revenue": price * quantity,
                     "status": item.get("status", ""),
+                    **expenses,
                 })
 
         return orders

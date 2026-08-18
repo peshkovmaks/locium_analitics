@@ -14,11 +14,16 @@ Key endpoints:
 Note: Api-Key is the recommended auth method. OAuth is legacy and may have limited access.
 """
 
+import asyncio
+import csv
 import httpx
+import io
 import logging
+import time
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
+from urllib.parse import urlparse
 
 from app.adapters.base import MarketplaceAdapter
 from app.utils.retry import async_retry
@@ -281,24 +286,147 @@ class YandexMarketAdapter(MarketplaceAdapter):
 
         Uses /v2/reports/united-marketplace-services/generate
         This is async — first request generates report, then we poll for status.
-        For simplicity, we return empty list (full implementation requires polling).
+        Returns aggregated expenses per SKU.
         """
         if not self.business_id:
             logger.warning("YM Business ID not available, skipping finance report")
             return []
 
-        gen_response = await self._post(
-            "/v2/reports/united-marketplace-services/generate",
-            {
-                "businessId": int(self.business_id) if self.business_id.isdigit() else 0,
-                "dateFrom": date_from.strftime("%Y-%m-%d"),
-                "dateTo": date_to.strftime("%Y-%m-%d"),
-            },
-        )
+        try:
+            gen_response = await self._post(
+                "/v2/reports/united-marketplace-services/generate",
+                {
+                    "businessId": int(self.business_id) if self.business_id.isdigit() else 0,
+                    "dateFrom": date_from.strftime("%Y-%m-%d"),
+                    "dateTo": date_to.strftime("%Y-%m-%d"),
+                },
+            )
+        except httpx.HTTPStatusError as e:
+            logger.warning("YM finance report generation failed: %s", e)
+            return []
 
-        report_id = gen_response.get("result", {}).get("reportId")
-        if report_id:
-            logger.info(f"YM finance report generation started: {report_id}")
+        report_id = gen_response.get("result", {}).get("reportId") or gen_response.get("reportId")
+        if not report_id:
+            logger.warning("YM finance report did not return reportId")
+            return []
 
-        # TODO: Implement polling with GET /v2/reports/info/{reportId}
-        return []
+        logger.info("YM finance report generation started: %s", report_id)
+
+        # Poll for report completion
+        file_url = None
+        for attempt in range(30):
+            await asyncio.sleep(5)
+            try:
+                info = await self._get(f"/v2/reports/info/{report_id}")
+            except httpx.HTTPStatusError as e:
+                logger.warning("YM report info request failed: %s", e)
+                continue
+
+            status = (info.get("result") or info or {}).get("status", "").upper()
+            if status == "DONE":
+                file_url = (info.get("result") or info or {}).get("file")
+                logger.info("YM finance report ready after %s attempts", attempt + 1)
+                break
+            elif status in ("FAILED", "ERROR", "CANCELLED"):
+                logger.warning("YM finance report generation failed with status: %s", status)
+                return []
+
+        if not file_url:
+            logger.warning("YM finance report did not become ready in time")
+            return []
+
+        return await self._download_and_parse_ym_report(file_url)
+
+    async def _download_and_parse_ym_report(self, file_url: str) -> List[Dict[str, Any]]:
+        """Download YM report file and aggregate expenses by SKU."""
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client:
+                response = await client.get(file_url)
+                response.raise_for_status()
+                content = response.content
+        except Exception as e:
+            logger.warning("YM report download failed: %s", e)
+            return []
+
+        content_type = response.headers.get("content-type", "")
+        if "zip" in content_type or content.startswith(b"PK"):
+            logger.warning("YM report is a ZIP archive; parsing not implemented")
+            return []
+
+        # Try CSV parsing
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            text = content.decode("cp1251", errors="replace")
+
+        reader = csv.DictReader(io.StringIO(text), delimiter=";")
+        if not reader.fieldnames:
+            logger.warning("YM report CSV has no headers")
+            return []
+
+        # Defensive column name normalization
+        headers = [h.strip().upper() for h in reader.fieldnames]
+        header_map = {h: orig for h, orig in zip(headers, reader.fieldnames)}
+
+        def col(*names):
+            for name in names:
+                n = name.upper()
+                if n in header_map:
+                    return header_map[n]
+            return None
+
+        sku_col = col("SHOP_SKU", "SKU")
+        price_col = col("SERVICE_PRICE", "TOTAL_AMOUNT", "AMOUNT", "TOTAL")
+        service_col = col("SERVICE_NAME", "SERVICE")
+        order_col = col("ORDER_ID")
+
+        if not sku_col or not price_col:
+            logger.warning("YM report CSV missing required columns; headers: %s", headers)
+            return []
+
+        aggregated: Dict[str, Dict[str, Decimal]] = {}
+        for row in reader:
+            sku = str(row.get(sku_col, "")).strip()
+            if not sku:
+                continue
+            try:
+                price = Decimal(str(row.get(price_col, "0") or "0").replace(",", "."))
+            except Exception:
+                continue
+            service_name = str(row.get(service_col, "")).lower() if service_col else ""
+
+            if sku not in aggregated:
+                aggregated[sku] = {
+                    "commission": Decimal(0),
+                    "logistics": Decimal(0),
+                    "storage": Decimal(0),
+                    "returns": Decimal(0),
+                    "other": Decimal(0),
+                }
+
+            # Categorize by service name keywords
+            if any(k in service_name for k in ("commission", "sale", "продажа")):
+                aggregated[sku]["commission"] += price
+            elif any(k in service_name for k in ("delivery", "logistics", "shipment", "доставка", "логистика")):
+                aggregated[sku]["logistics"] += price
+            elif any(k in service_name for k in ("storage", "хранение")):
+                aggregated[sku]["storage"] += price
+            elif any(k in service_name for k in ("return", "возврат")):
+                aggregated[sku]["returns"] += price
+            else:
+                aggregated[sku]["other"] += price
+
+        reports = []
+        for sku, amounts in aggregated.items():
+            reports.append({
+                "date": datetime.utcnow(),
+                "external_sku": sku,
+                "external_id": "",
+                "quantity": 0,
+                "price": Decimal(0),
+                "revenue": Decimal(0),
+                **amounts,
+            })
+
+        logger.info("YM finance report parsed: %s SKU expense records", len(reports))
+        return reports
