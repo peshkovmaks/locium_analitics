@@ -126,16 +126,22 @@ class MarketplaceComparison(BaseModel):
     drr: Decimal
 
 
-class UnitEconomicsRow(BaseModel):
-    sku: str
-    name: str
+class UnitEconomicsMarketplaceRow(BaseModel):
     marketplace: str
+    sales: int
     price: Decimal
     cost: Decimal
     expense_per_unit: Decimal
     net_per_unit: Decimal
-    sales: int
-    total_net: Decimal
+    margin: Decimal
+    drr: Decimal
+
+
+class UnitEconomicsRow(BaseModel):
+    sku: str
+    name: str
+    cost: Decimal
+    rows: List[UnitEconomicsMarketplaceRow]
 
 
 class ProductDashboardRow(BaseModel):

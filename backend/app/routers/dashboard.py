@@ -16,6 +16,7 @@ from app.schemas import (
     AlertItem,
     MarketplaceComparison,
     UnitEconomicsRow,
+    UnitEconomicsMarketplaceRow,
     ProductDashboardRow,
 )
 from app.auth import get_current_user
@@ -243,15 +244,13 @@ async def get_dashboard(
             )
         )
 
-    # Unit economics — aggregate by SKU, use real expenses from Sale
-    unit_rows: List[UnitEconomicsRow] = []
-
-    # Group sales by external_sku (and shop, since one SKU belongs to one shop)
+    # Unit economics — group by product, show per-marketplace rows
     sku_sales: Dict[tuple, List[Sale]] = {}
     for s in sales:
         key = (s.external_sku, s.shop_id)
         sku_sales.setdefault(key, []).append(s)
 
+    product_unit_map: Dict[str, dict] = {}
     for (external_sku, shop_id), s_sales in sku_sales.items():
         if external_sku not in products:
             continue
@@ -267,25 +266,40 @@ async def get_dashboard(
             s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other
             for s in s_sales
         )
+        total_ads_sku = sum(s.advertising for s in s_sales)
 
         avg_price = (total_revenue_sku / total_qty) if total_qty > 0 else Decimal(0)
         expense_per_unit = (total_expenses_sku / total_qty) if total_qty > 0 else Decimal(0)
         net_per = avg_price - p.cost_price - expense_per_unit
+        margin = (net_per / avg_price * 100) if avg_price > 0 else Decimal(0)
+        drr_sku = (total_ads_sku / total_revenue_sku * 100) if total_revenue_sku > 0 else Decimal(0)
 
-        unit_rows.append(
-            UnitEconomicsRow(
-                sku=p.sku,
-                name=p.name,
+        if p.sku not in product_unit_map:
+            product_unit_map[p.sku] = {
+                "sku": p.sku,
+                "name": p.name,
+                "cost": p.cost_price,
+                "rows": [],
+            }
+
+        product_unit_map[p.sku]["rows"].append(
+            UnitEconomicsMarketplaceRow(
                 marketplace=MP_NAMES.get(mp, mp),
+                sales=total_qty,
                 price=avg_price,
                 cost=p.cost_price,
                 expense_per_unit=expense_per_unit,
                 net_per_unit=net_per,
-                sales=total_qty,
-                total_net=net_per * total_qty,
+                margin=margin,
+                drr=drr_sku,
             )
         )
-    unit_rows.sort(key=lambda x: x.total_net, reverse=True)
+
+    unit_rows: List[UnitEconomicsRow] = sorted(
+        [UnitEconomicsRow(**v) for v in product_unit_map.values()],
+        key=lambda x: sum(r.net_per_unit * r.sales for r in x.rows),
+        reverse=True,
+    )
 
     # Product dashboard rows
     product_rows: List[ProductDashboardRow] = []

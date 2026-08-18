@@ -274,25 +274,13 @@ function MarketplaceComparisonTable({ rows }) {
   );
 }
 
+const MP_KEY_BY_NAME = {
+  Wildberries: 'wb',
+  Ozon: 'ozon',
+  'Яндекс Маркет': 'ym',
+};
+
 function UnitEconomicsTable({ rows }) {
-  const grouped = useMemo(() => {
-    const map = new Map();
-    rows.forEach((r) => {
-      if (!map.has(r.sku)) {
-        map.set(r.sku, { name: r.name, sku: r.sku, cost: r.cost, items: [] });
-      }
-      map.get(r.sku).items.push(r);
-    });
-    return Array.from(map.values());
-  }, [rows]);
-
-  const mpKeyForName = (name) => {
-    if (name === 'Wildberries') return 'wb';
-    if (name === 'Ozon') return 'ozon';
-    if (name === 'Яндекс Маркет') return 'ym';
-    return 'ozon';
-  };
-
   return (
     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 overflow-x-auto">
       <h3 className="font-semibold mb-4">Unit-экономика</h3>
@@ -309,7 +297,7 @@ function UnitEconomicsTable({ rows }) {
             <th className="text-right py-2 font-normal">ДРР</th>
           </tr>
         </thead>
-        {grouped.map((product) => (
+        {rows.map((product) => (
           <tbody key={product.sku} className="border-b-2 border-gray-100">
             <tr className="bg-gray-50/70">
               <td className="py-2 px-3 font-semibold text-gray-900" colSpan="8">
@@ -319,12 +307,12 @@ function UnitEconomicsTable({ rows }) {
                 </span>
               </td>
             </tr>
-            {product.items.map((r) => {
-              const key = mpKeyForName(r.marketplace);
-              const margin = Number(r.net_per_unit) / Number(r.price) * 100;
-              const drr = 0; // not provided by current API
+            {product.rows.map((r) => {
+              const key = MP_KEY_BY_NAME[r.marketplace] || 'ozon';
+              const margin = Number(r.margin);
+              const drr = Number(r.drr);
               return (
-                <tr key={`${r.sku}-${r.marketplace}`} className="border-b">
+                <tr key={`${product.sku}-${r.marketplace}`} className="border-b">
                   <td className="py-2 px-3">
                     <Badge color={MP_COLORS[key]}>
                       <span className="w-1.5 h-1.5 rounded-full" style={{ background: MP_COLORS[key] }} />
