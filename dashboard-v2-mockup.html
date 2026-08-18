@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Locium Analytics — макет дашборда v2</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .kpi-card { box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .sparkline { height: 40px; }
+    .mini-bar { display: inline-block; width: 4px; margin-right: 2px; border-radius: 2px; background: #3b82f6; }
+    .positive { color: #16a34a; }
+    .negative { color: #dc2626; }
+    .badge-red { background: #fee2e2; color: #991b1b; }
+    .badge-yellow { background: #fef3c7; color: #92400e; }
+    .badge-green { background: #dcfce7; color: #166534; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+  <div class="max-w-7xl mx-auto p-6">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold">Дашборд</h1>
+        <p class="text-sm text-gray-500">WB · Ozon · Яндекс Маркет</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="flex bg-white border rounded-lg p-0.5 text-sm">
+          <button class="px-3 py-1.5 rounded-md bg-blue-600 text-white font-medium">Сегодня</button>
+          <button class="px-3 py-1.5 rounded-md text-gray-700 hover:bg-gray-100">7 дней</button>
+          <button class="px-3 py-1.5 rounded-md text-gray-700 hover:bg-gray-100">30 дней</button>
+        </div>
+        <div class="flex items-center gap-2 text-sm">
+          <span class="text-gray-500">или</span>
+          <input type="date" value="2026-08-11" class="border rounded-lg px-2 py-2 bg-white text-gray-700" />
+          <span class="text-gray-400">—</span>
+          <input type="date" value="2026-08-18" class="border rounded-lg px-2 py-2 bg-white text-gray-700" />
+          <button class="border rounded-lg px-3 py-2 bg-white text-gray-700 hover:bg-gray-50 font-medium">Применить</button>
+        </div>
+        <select class="border rounded-lg px-3 py-2 bg-white text-sm">
+          <option>Все площадки</option>
+          <option>Wildberries</option>
+          <option>Ozon</option>
+          <option>Яндекс Маркет</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- KPI Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="kpi-card bg-white rounded-xl p-5">
+        <p class="text-sm text-gray-500 mb-1">Выручка</p>
+        <p class="text-2xl font-bold">₽ 3 472 112</p>
+        <div class="mt-2 space-y-1 text-xs text-gray-600">
+          <div class="flex justify-between"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span>Wildberries</span><span class="font-medium">₽ 2 043 210</span></div>
+          <div class="flex justify-between"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-purple-500"></span>Ozon</span><span class="font-medium">₽ 1 053 687</span></div>
+          <div class="flex justify-between"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-red-500"></span>Яндекс Маркет</span><span class="font-medium">₽ 375 216</span></div>
+        </div>
+        <div class="h-10 mt-3"><canvas id="sparkRevenue"></canvas></div>
+        <p class="text-sm positive mt-1">+15% к прошлой неделе</p>
+      </div>
+      <div class="kpi-card bg-white rounded-xl p-5">
+        <p class="text-sm text-gray-500 mb-1">Валовая прибыль</p>
+        <p class="text-2xl font-bold">₽ 2 249 700</p>
+        <div class="mt-2 space-y-1 text-xs text-gray-600">
+          <div class="flex justify-between"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span>Wildberries</span><span class="font-medium">₽ 1 266 790</span></div>
+          <div class="flex justify-between"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-purple-500"></span>Ozon</span><span class="font-medium">₽ 632 212</span></div>
+          <div class="flex justify-between"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-red-500"></span>Яндекс Маркет</span><span class="font-medium">₽ 225 130</span></div>
+        </div>
+        <div class="h-10 mt-3"><canvas id="sparkGross"></canvas></div>
+        <p class="text-sm positive mt-1">+7% к прошлой неделе</p>
+      </div>
+      <div class="kpi-card bg-white rounded-xl p-5">
+        <p class="text-sm text-gray-500 mb-1">Чистая прибыль</p>
+        <p class="text-2xl font-bold">₽ 1 208 066</p>
+        <div class="mt-2 space-y-1 text-xs text-gray-600">
+          <div class="flex justify-between"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span>Wildberries</span><span class="font-medium">₽ 652 827</span></div>
+          <div class="flex justify-between"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-purple-500"></span>Ozon</span><span class="font-medium">₽ 398 893</span></div>
+          <div class="flex justify-between"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-red-500"></span>Яндекс Маркет</span><span class="font-medium">₽ 156 346</span></div>
+        </div>
+        <div class="h-10 mt-3"><canvas id="sparkNet"></canvas></div>
+        <p class="text-sm positive mt-1">+2% к прошлой неделе</p>
+      </div>
+      <div class="kpi-card bg-white rounded-xl p-5">
+        <p class="text-sm text-gray-500 mb-1">ДРР</p>
+        <p class="text-2xl font-bold">6.7%</p>
+        <div class="mt-2 space-y-1 text-xs text-gray-600">
+          <div class="flex justify-between"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span>Wildberries</span><span class="font-medium">8.0%</span></div>
+          <div class="flex justify-between"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-purple-500"></span>Ozon</span><span class="font-medium">5.0%</span></div>
+          <div class="flex justify-between"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-red-500"></span>Яндекс Маркет</span><span class="font-medium">4.0%</span></div>
+        </div>
+        <div class="h-10 mt-3"><canvas id="sparkDrr"></canvas></div>
+        <p class="text-sm negative mt-1">−2% к прошлой неделе</p>
+      </div>
+    </div>
+
+    <!-- Charts row 1 -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+      <div class="bg-white rounded-xl p-5 lg:col-span-2">
+        <h3 class="font-semibold mb-4">Выручка по площадкам</h3>
+        <div class="h-64"><canvas id="revenueLineChart"></canvas></div>
+      </div>
+      <div class="bg-white rounded-xl p-5">
+        <h3 class="font-semibold mb-4">Доля выручки</h3>
+        <div class="h-48"><canvas id="revenueShareChart"></canvas></div>
+        <div class="mt-4 space-y-2 text-sm">
+          <div class="flex justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-blue-500"></span>Wildberries</span><span class="font-medium">58.8%</span></div>
+          <div class="flex justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-purple-500"></span>Ozon</span><span class="font-medium">30.3%</span></div>
+          <div class="flex justify-between"><span class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-red-500"></span>Яндекс Маркет</span><span class="font-medium">10.8%</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts row 2 -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+      <div class="bg-white rounded-xl p-5">
+        <h3 class="font-semibold mb-4">Структура расходов</h3>
+        <div class="h-56"><canvas id="expenseChart"></canvas></div>
+      </div>
+      <div class="bg-white rounded-xl p-5">
+        <h3 class="font-semibold mb-4">ДРР по площадкам</h3>
+        <p class="text-xs text-gray-500 mb-3">Целевой ДРР: ≤ 10%</p>
+        <div class="h-48"><canvas id="drrChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Marketplace comparison table -->
+    <div class="bg-white rounded-xl p-5 mb-6">
+      <h3 class="font-semibold mb-4">Сравнение площадок</h3>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-gray-500 border-b">
+            <tr>
+              <th class="text-left py-2">Площадка</th>
+              <th class="text-right py-2">Выручка</th>
+              <th class="text-right py-2">Расходы</th>
+              <th class="text-right py-2">Валовая</th>
+              <th class="text-right py-2">Чистая</th>
+              <th class="text-right py-2">Чистая маржа</th>
+              <th class="text-right py-2">ДРР</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="border-b">
+              <td class="py-3 font-medium">Wildberries</td>
+              <td class="text-right">₽ 2 043 210</td>
+              <td class="text-right">₽ 776 420</td>
+              <td class="text-right">₽ 1 266 790</td>
+              <td class="text-right">₽ 652 827</td>
+              <td class="text-right"><span class="px-2 py-1 rounded-full text-xs badge-green">32.0%</span></td>
+              <td class="text-right"><span class="px-2 py-1 rounded-full text-xs badge-yellow">8.0%</span></td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-3 font-medium">Ozon</td>
+              <td class="text-right">₽ 1 053 687</td>
+              <td class="text-right">₽ 421 475</td>
+              <td class="text-right">₽ 632 212</td>
+              <td class="text-right">₽ 398 893</td>
+              <td class="text-right"><span class="px-2 py-1 rounded-full text-xs badge-green">37.9%</span></td>
+              <td class="text-right"><span class="px-2 py-1 rounded-full text-xs badge-green">5.0%</span></td>
+            </tr>
+            <tr>
+              <td class="py-3 font-medium">Яндекс Маркет</td>
+              <td class="text-right">₽ 375 216</td>
+              <td class="text-right">₽ 150 086</td>
+              <td class="text-right">₽ 225 130</td>
+              <td class="text-right">₽ 156 346</td>
+              <td class="text-right"><span class="px-2 py-1 rounded-full text-xs badge-green">41.7%</span></td>
+              <td class="text-right"><span class="px-2 py-1 rounded-full text-xs badge-green">4.0%</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Unit economics table -->
+    <div class="bg-white rounded-xl p-5">
+      <h3 class="font-semibold mb-4">Unit-экономика</h3>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-gray-500 border-b">
+            <tr>
+              <th class="text-left py-2">Площадка</th>
+              <th class="text-right py-2">Продано</th>
+              <th class="text-right py-2">Цена</th>
+              <th class="text-right py-2">Себест.</th>
+              <th class="text-right py-2">Расх. МП</th>
+              <th class="text-right py-2">Чистая/шт</th>
+              <th class="text-right py-2">Маржа</th>
+              <th class="text-right py-2">Тренд</th>
+              <th class="text-right py-2">ДРР</th>
+            </tr>
+          </thead>
+
+          <!-- Product 1 -->
+          <tbody class="border-b-2 border-gray-100">
+            <tr class="bg-gray-50/70">
+              <td class="py-2 px-3 font-semibold text-gray-900" colspan="9">
+                Набор чая ТРАВКИ, 8 вкусов <span class="text-xs text-gray-400 font-normal ml-2">travki-assorti · себест. ₽ 420</span>
+              </td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2 px-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style="background:#eff6ff;color:#2563eb"><span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>WB</span></td>
+              <td class="text-right">142</td>
+              <td class="text-right">₽ 1 250</td>
+              <td class="text-right text-gray-500">₽ 420</td>
+              <td class="text-right text-gray-500">₽ 280</td>
+              <td class="text-right positive font-medium">+₽ 550</td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">44.0%</span></td>
+              <td class="py-1"><canvas class="miniSpark" data-values="12,18,15,22,19,25,28,24,30" height="36"></canvas></td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">4.5%</span></td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2 px-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style="background:#faf5ff;color:#7c3aed"><span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>Ozon</span></td>
+              <td class="text-right">89</td>
+              <td class="text-right">₽ 1 290</td>
+              <td class="text-right text-gray-500">₽ 420</td>
+              <td class="text-right text-gray-500">₽ 310</td>
+              <td class="text-right positive font-medium">+₽ 560</td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">43.4%</span></td>
+              <td class="py-1"><canvas class="miniSpark" data-values="10,13,12,16,15,18,20,19,22" height="36"></canvas></td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">5.0%</span></td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2 px-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style="background:#fef2f2;color:#dc2626"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>ЯМ</span></td>
+              <td class="text-right">45</td>
+              <td class="text-right">₽ 1 270</td>
+              <td class="text-right text-gray-500">₽ 420</td>
+              <td class="text-right text-gray-500">₽ 330</td>
+              <td class="text-right positive font-medium">+₽ 520</td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">40.9%</span></td>
+              <td class="py-1"><canvas class="miniSpark" data-values="4,6,5,7,8,7,9,8,10" height="36"></canvas></td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-yellow">6.0%</span></td>
+            </tr>
+          </tbody>
+
+          <!-- Product 2 -->
+          <tbody class="border-b-2 border-gray-100">
+            <tr class="bg-gray-50/70">
+              <td class="py-2 px-3 font-semibold text-gray-900" colspan="9">
+                Мёд лесной, 250 мл <span class="text-xs text-gray-400 font-normal ml-2">foresthoney · себест. ₽ 380</span>
+              </td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2 px-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style="background:#eff6ff;color:#2563eb"><span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>WB</span></td>
+              <td class="text-right">120</td>
+              <td class="text-right">₽ 1 150</td>
+              <td class="text-right text-gray-500">₽ 380</td>
+              <td class="text-right text-gray-500">₽ 300</td>
+              <td class="text-right positive font-medium">+₽ 470</td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">40.9%</span></td>
+              <td class="py-1"><canvas class="miniSpark" data-values="8,10,12,11,14,13,16,18,15" height="36"></canvas></td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-yellow">8.0%</span></td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2 px-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style="background:#faf5ff;color:#7c3aed"><span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>Ozon</span></td>
+              <td class="text-right">89</td>
+              <td class="text-right">₽ 1 150</td>
+              <td class="text-right text-gray-500">₽ 380</td>
+              <td class="text-right text-gray-500">₽ 310</td>
+              <td class="text-right positive font-medium">+₽ 460</td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">40.0%</span></td>
+              <td class="py-1"><canvas class="miniSpark" data-values="7,9,8,10,11,12,11,13,14" height="36"></canvas></td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-yellow">9.1%</span></td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2 px-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style="background:#fef2f2;color:#dc2626"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>ЯМ</span></td>
+              <td class="text-right">56</td>
+              <td class="text-right">₽ 1 180</td>
+              <td class="text-right text-gray-500">₽ 380</td>
+              <td class="text-right text-gray-500">₽ 320</td>
+              <td class="text-right positive font-medium">+₽ 480</td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">40.7%</span></td>
+              <td class="py-1"><canvas class="miniSpark" data-values="3,4,5,4,6,5,7,6,8" height="36"></canvas></td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">7.0%</span></td>
+            </tr>
+          </tbody>
+
+          <!-- Product 3 -->
+          <tbody class="border-b-2 border-gray-100">
+            <tr class="bg-gray-50/70">
+              <td class="py-2 px-3 font-semibold text-gray-900" colspan="9">
+                Дегустационный набор, 5 вкусов <span class="text-xs text-gray-400 font-normal ml-2">123456 · себест. ₽ 410</span>
+              </td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2 px-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style="background:#eff6ff;color:#2563eb"><span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>WB</span></td>
+              <td class="text-right">78</td>
+              <td class="text-right">₽ 980</td>
+              <td class="text-right text-gray-500">₽ 410</td>
+              <td class="text-right text-gray-500">₽ 340</td>
+              <td class="text-right positive font-medium">+₽ 230</td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-yellow">23.5%</span></td>
+              <td class="py-1"><canvas class="miniSpark" data-values="5,4,6,5,7,6,8,7,9" height="36"></canvas></td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-red">12.0%</span></td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2 px-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style="background:#faf5ff;color:#7c3aed"><span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>Ozon</span></td>
+              <td class="text-right">45</td>
+              <td class="text-right">₽ 990</td>
+              <td class="text-right text-gray-500">₽ 410</td>
+              <td class="text-right text-gray-500">₽ 350</td>
+              <td class="text-right positive font-medium">+₽ 230</td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-yellow">23.2%</span></td>
+              <td class="py-1"><canvas class="miniSpark" data-values="3,4,3,5,4,6,5,7,6" height="36"></canvas></td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-red">11.0%</span></td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2 px-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style="background:#fef2f2;color:#dc2626"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>ЯМ</span></td>
+              <td class="text-right">34</td>
+              <td class="text-right">₽ 980</td>
+              <td class="text-right text-gray-500">₽ 410</td>
+              <td class="text-right text-gray-500">₽ 340</td>
+              <td class="text-right positive font-medium">+₽ 230</td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-yellow">23.5%</span></td>
+              <td class="py-1"><canvas class="miniSpark" data-values="2,3,4,3,5,4,6,5,7" height="36"></canvas></td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-red">12.3%</span></td>
+            </tr>
+          </tbody>
+
+          <!-- Product 4 -->
+          <tbody class="border-b-2 border-gray-100">
+            <tr class="bg-gray-50/70">
+              <td class="py-2 px-3 font-semibold text-gray-900" colspan="9">
+                Набор «Благодарю» <span class="text-xs text-gray-400 font-normal ml-2">green_2025 · себест. ₽ 0</span>
+              </td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2 px-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style="background:#eff6ff;color:#2563eb"><span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>WB</span></td>
+              <td class="text-right">21</td>
+              <td class="text-right">₽ 2 300</td>
+              <td class="text-right text-gray-500">₽ 0</td>
+              <td class="text-right text-gray-500">₽ 920</td>
+              <td class="text-right positive font-medium">+₽ 1 380</td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">60.0%</span></td>
+              <td class="py-1"><canvas class="miniSpark" data-values="2,3,2,4,3,5,4,6,5" height="36"></canvas></td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">3.2%</span></td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2 px-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style="background:#faf5ff;color:#7c3aed"><span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>Ozon</span></td>
+              <td class="text-right">15</td>
+              <td class="text-right">₽ 2 350</td>
+              <td class="text-right text-gray-500">₽ 0</td>
+              <td class="text-right text-gray-500">₽ 940</td>
+              <td class="text-right positive font-medium">+₽ 1 410</td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">60.0%</span></td>
+              <td class="py-1"><canvas class="miniSpark" data-values="1,2,3,2,4,3,5,4,6" height="36"></canvas></td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">3.0%</span></td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2 px-3"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style="background:#fef2f2;color:#dc2626"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>ЯМ</span></td>
+              <td class="text-right">9</td>
+              <td class="text-right">₽ 2 280</td>
+              <td class="text-right text-gray-500">₽ 0</td>
+              <td class="text-right text-gray-500">₽ 912</td>
+              <td class="text-right positive font-medium">+₽ 1 368</td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">60.0%</span></td>
+              <td class="py-1"><canvas class="miniSpark" data-values="1,1,2,2,3,3,4,4,5" height="36"></canvas></td>
+              <td class="text-right"><span class="px-2 py-0.5 rounded-full text-xs badge-green">3.5%</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const commonOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: true } },
+      scales: { x: { display: false }, y: { display: false } },
+      elements: { point: { radius: 0 } },
+    };
+
+    // Sparklines
+    ['sparkRevenue','sparkGross','sparkNet','sparkDrr'].forEach((id, i) => {
+      const ctx = document.getElementById(id).getContext('2d');
+      const data = [12,15,13,18,16,20,19,22,20,24,23,25,28,26,30];
+      const color = i === 3 ? '#dc2626' : '#16a34a';
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: data.map((_,i)=>i),
+          datasets: [{
+            data,
+            borderColor: color,
+            borderWidth: 2,
+            fill: false,
+            tension: 0.3
+          }]
+        },
+        options: commonOptions
+      });
+    });
+
+    // Revenue line chart
+    const labels = Array.from({length: 30}, (_, i) => `${i+1} авг`);
+    new Chart(document.getElementById('revenueLineChart'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'WB', data: labels.map(() => 50000 + Math.random()*30000), borderColor: '#3b82f6', backgroundColor: '#3b82f6', tension: 0.3, pointRadius: 0 },
+          { label: 'Ozon', data: labels.map(() => 25000 + Math.random()*15000), borderColor: '#a855f7', backgroundColor: '#a855f7', tension: 0.3, pointRadius: 0 },
+          { label: 'Яндекс Маркет', data: labels.map(() => 8000 + Math.random()*7000), borderColor: '#ef4444', backgroundColor: '#ef4444', tension: 0.3, pointRadius: 0 },
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'bottom' } },
+        scales: { y: { beginAtZero: true, grid: { color: '#f3f4f6' } }, x: { grid: { display: false } } }
+      }
+    });
+
+    // Revenue share donut
+    new Chart(document.getElementById('revenueShareChart'), {
+      type: 'doughnut',
+      data: {
+        labels: ['Wildberries', 'Ozon', 'Яндекс Маркет'],
+        datasets: [{
+          data: [58.8, 30.3, 10.8],
+          backgroundColor: ['#3b82f6', '#a855f7', '#ef4444'],
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '70%',
+        plugins: { legend: { display: false } }
+      }
+    });
+
+    // Expense structure donut
+    new Chart(document.getElementById('expenseChart'), {
+      type: 'doughnut',
+      data: {
+        labels: ['Комиссия', 'Логистика', 'Реклама', 'Хранение', 'Возвраты', 'Прочее'],
+        datasets: [{
+          data: [38.5, 28.4, 18.9, 5.7, 5.7, 2.8],
+          backgroundColor: ['#3b82f6', '#a855f7', '#ef4444', '#22c55e', '#f59e0b', '#9ca3af'],
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '55%',
+        plugins: { legend: { position: 'right' } }
+      }
+    });
+
+    // DRR horizontal bars
+    new Chart(document.getElementById('drrChart'), {
+      type: 'bar',
+      data: {
+        labels: ['Wildberries', 'Ozon', 'Яндекс Маркет'],
+        datasets: [{
+          data: [8.0, 5.0, 4.0],
+          backgroundColor: ['#3b82f6', '#a855f7', '#ef4444'],
+          borderRadius: 4,
+          barThickness: 16
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, annotation: { annotations: { line1: { type: 'line', xMin: 10, xMax: 10, borderColor: '#9ca3af', borderWidth: 2, borderDash: [6, 6] } } } },
+        scales: { x: { max: 15, grid: { color: '#f3f4f6' } }, y: { grid: { display: false } } }
+      }
+    });
+
+    // Mini sparklines in unit economics rows
+    document.querySelectorAll('.miniSpark').forEach(canvas => {
+      const values = canvas.dataset.values.split(',').map(Number);
+      new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: { labels: values.map((_,i)=>i), datasets: [{ data: values, backgroundColor: '#3b82f6', barThickness: 3, borderRadius: 1 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false } } }
+      });
+    });
+  </script>
+</body>
+</html>
