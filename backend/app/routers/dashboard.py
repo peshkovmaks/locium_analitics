@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from datetime import datetime, timedelta
-from typing import List, Dict
+from datetime import datetime, timedelta, date
+from typing import List, Dict, Optional
 from decimal import Decimal
+
+from fastapi import Query
 
 from app.database import get_db
 from app.models import User, Shop, Product, Sale, Stock, Advert, Marketplace
@@ -54,6 +56,8 @@ MP_NAMES = {"wb": "Wildberries", "ozon": "Ozon", "ym": "Яндекс Марке�
 async def get_dashboard(
     period: str = "today",
     marketplace: str = "all",
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD). Overrides period if provided together with end_date."),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD). Overrides period if provided together with start_date."),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -68,21 +72,30 @@ async def get_dashboard(
 
     # Get date range
     now = datetime.utcnow()
-    if period == "today":
-        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if start_date and end_date:
+        start_dt = datetime.combine(start_date, datetime.min.time())
+        end_dt = datetime.combine(end_date, datetime.max.time())
+    elif period == "today":
+        start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_dt = now
     elif period == "7d":
-        start_date = (now - timedelta(days=7)).replace(
+        start_dt = (now - timedelta(days=7)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
+        end_dt = now
     else:
-        start_date = (now - timedelta(days=30)).replace(
+        start_dt = (now - timedelta(days=30)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
+        end_dt = now
 
     # Get sales
     sales_result = await db.execute(
         select(Sale).where(
-            Sale.shop_id.in_(shop_ids), Sale.date >= start_date, Sale.is_return == False
+            Sale.shop_id.in_(shop_ids),
+            Sale.date >= start_dt,
+            Sale.date <= end_dt,
+            Sale.is_return == False,
         )
     )
     sales = sales_result.scalars().all()
@@ -90,14 +103,21 @@ async def get_dashboard(
     # Get returns
     returns_result = await db.execute(
         select(Sale).where(
-            Sale.shop_id.in_(shop_ids), Sale.date >= start_date, Sale.is_return == True
+            Sale.shop_id.in_(shop_ids),
+            Sale.date >= start_dt,
+            Sale.date <= end_dt,
+            Sale.is_return == True,
         )
     )
     returns = returns_result.scalars().all()
 
     # Get adverts
     adverts_result = await db.execute(
-        select(Advert).where(Advert.shop_id.in_(shop_ids), Advert.date >= start_date)
+        select(Advert).where(
+            Advert.shop_id.in_(shop_ids),
+            Advert.date >= start_dt,
+            Advert.date <= end_dt,
+        )
     )
     adverts = adverts_result.scalars().all()
 

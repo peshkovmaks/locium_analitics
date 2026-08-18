@@ -37,8 +37,12 @@ export const auth = {
 };
 
 export const dashboard = {
-  getData: (period = 'today', marketplace = 'all') =>
-    api(`/dashboard/data?period=${period}&marketplace=${marketplace}`),
+  getData: (period = 'today', marketplace = 'all', startDate = null, endDate = null) => {
+    let url = `/dashboard/data?period=${period}&marketplace=${marketplace}`;
+    if (startDate) url += `&start_date=${startDate}`;
+    if (endDate) url += `&end_date=${endDate}`;
+    return api(url);
+  },
 };
 
 export const products = {
