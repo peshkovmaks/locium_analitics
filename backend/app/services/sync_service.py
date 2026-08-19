@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
 from app.adapters.base import AdapterFactory
+from app.adapters.wildberries import RateLimitExceeded
 from app.models import Shop, Sale, Stock, Advert, Product, ProductShopMapping, SyncLog
 
 
@@ -81,6 +82,8 @@ class SyncService:
                     await self._save_sales(shop.id, sales)
                     all_items.extend(sales)
                     results["orders"] = {"status": "success", "count": len(sales), "message": None}
+            except RateLimitExceeded as e:
+                results["orders"] = {"status": "rate_limited", "count": 0, "message": str(e)}
             except Exception as e:
                 results["orders"] = {"status": "error", "count": 0, "message": str(e)}
 
@@ -89,8 +92,11 @@ class SyncService:
                 await self._clear_stocks(shop.id)
                 stocks = await adapter.get_stocks()
                 await self._save_stocks(shop.id, stocks)
-                all_items.extend(stocks)
+                # Do not enrich products from stocks: WB warehouse_remains uses
+                # nmId, which differs from the supplierArticle used by orders.
                 results["stocks"] = {"status": "success", "count": len(stocks), "message": None}
+            except RateLimitExceeded as e:
+                results["stocks"] = {"status": "rate_limited", "count": 0, "message": str(e)}
             except Exception as e:
                 results["stocks"] = {"status": "error", "count": 0, "message": str(e)}
 
@@ -100,6 +106,8 @@ class SyncService:
                 adverts = await adapter.get_adverts(date_from, date_to)
                 await self._save_adverts(shop.id, adverts)
                 results["adverts"] = {"status": "success", "count": len(adverts), "message": None}
+            except RateLimitExceeded as e:
+                results["adverts"] = {"status": "rate_limited", "count": 0, "message": str(e)}
             except Exception as e:
                 results["adverts"] = {"status": "error", "count": 0, "message": str(e)}
 
@@ -108,6 +116,8 @@ class SyncService:
                 prices = await adapter.get_prices()
                 all_items.extend(prices)
                 results["prices"] = {"status": "success", "count": len(prices), "message": None}
+            except RateLimitExceeded as e:
+                results["prices"] = {"status": "rate_limited", "count": 0, "message": str(e)}
             except Exception as e:
                 results["prices"] = {"status": "error", "count": 0, "message": str(e)}
 
@@ -134,6 +144,8 @@ class SyncService:
                     results["finance"] = {"status": "success", "count": len(finance), "message": None}
                 else:
                     results["finance"] = {"status": "success", "count": 0, "message": "No finance data"}
+            except RateLimitExceeded as e:
+                results["finance"] = {"status": "rate_limited", "count": 0, "message": str(e)}
             except Exception as e:
                 results["finance"] = {"status": "error", "count": 0, "message": str(e)}
 

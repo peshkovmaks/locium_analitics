@@ -37,6 +37,10 @@ from app.utils.retry import async_retry
 logger = logging.getLogger(__name__)
 
 
+class RateLimitExceeded(Exception):
+    """Raised when WB asks for a retry interval we are unwilling to block for."""
+
+
 class WildberriesAdapter(MarketplaceAdapter):
     """Adapter for Wildberries API."""
 
@@ -84,11 +88,30 @@ class WildberriesAdapter(MarketplaceAdapter):
 
     @async_retry(max_retries=3, base_delay=60.0, max_delay=120.0)
     async def _get(self, endpoint: str, base: str = "statistics", params: Optional[Dict] = None) -> Any:
-        """Make GET request to WB API with retry."""
+        """Make GET request to WB API with retry.
+
+        Respects WB's x-ratelimit-retry / Retry-After headers. If WB asks for
+        a wait longer than 5 minutes we fail fast instead of blocking the sync
+        task for an hour.
+        """
         url = f"{self.BASE_URLS[base]}{endpoint}"
         await self._throttle()
         async with self._http_client() as client:
             response = await client.get(url, headers=self.headers, params=params, timeout=120.0)
+            if response.status_code == 429:
+                retry_after = response.headers.get("x-ratelimit-retry") or response.headers.get("Retry-After")
+                try:
+                    retry_seconds = float(retry_after) if retry_after else 60.0
+                except (ValueError, TypeError):
+                    retry_seconds = 60.0
+                # If WB wants us to wait more than 5 minutes, abort the sync
+                # with a clear reason rather than retrying in a tight loop.
+                if retry_seconds > 300:
+                    raise RateLimitExceeded(
+                        f"WB rate limit for {endpoint}: retry after {retry_seconds:.0f}s"
+                    )
+                await asyncio.sleep(retry_seconds)
+                response = await client.get(url, headers=self.headers, params=params, timeout=120.0)
             self._touch()
             response.raise_for_status()
             return response.json()
