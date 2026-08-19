@@ -49,6 +49,7 @@ class WildberriesAdapter(MarketplaceAdapter):
         "marketplace": "https://marketplace-api.wildberries.ru",
         "advert": "https://advert-api.wildberries.ru",
         "analytics": "https://seller-analytics-api.wildberries.ru",
+        "finance": "https://finance-api.wildberries.ru",
     }
 
     # Warehouse-remains report: max 1/min for create+download, 1/5s for status.
@@ -122,6 +123,34 @@ class WildberriesAdapter(MarketplaceAdapter):
         url = f"{self.BASE_URLS[base]}{endpoint}"
         async with self._http_client() as client:
             response = await client.post(url, headers=self.headers, json=data, timeout=30.0)
+            response.raise_for_status()
+            return response.json()
+
+    async def _finance_post(
+        self, endpoint: str, data: Optional[Dict] = None
+    ) -> Any:
+        """Make POST request to WB Finance API with 60s throttle.
+
+        Finance endpoints have a 1 request/min limit; violating it triggers a
+        multi-hour penalty, so we serialize all finance calls globally.
+        """
+        await self._throttle()
+        url = f"{self.BASE_URLS['finance']}{endpoint}"
+        async with self._http_client() as client:
+            response = await client.post(url, headers=self.headers, json=data, timeout=120.0)
+            self._touch()
+            if response.status_code == 429:
+                retry_after = response.headers.get("x-ratelimit-retry") or response.headers.get("Retry-After")
+                try:
+                    retry_seconds = float(retry_after) if retry_after else 60.0
+                except (ValueError, TypeError):
+                    retry_seconds = 60.0
+                if retry_seconds > 300:
+                    raise RateLimitExceeded(
+                        f"WB finance rate limit for {endpoint}: retry after {retry_seconds:.0f}s"
+                    )
+                await asyncio.sleep(retry_seconds)
+                response = await client.post(url, headers=self.headers, json=data, timeout=120.0)
             response.raise_for_status()
             return response.json()
 
@@ -217,79 +246,13 @@ class WildberriesAdapter(MarketplaceAdapter):
         return orders
 
     async def get_stocks(self) -> List[Dict[str, Any]]:
-        """Get current stock levels via the WB warehouse-remains report.
+        """Stocks are currently disabled for WB.
 
-        GET /api/v1/supplier/stocks (statistics API) was disabled by WB on
-        June 23, 2026. This is a 3-step async report on the Analytics API:
-        1. Create a report task (groupByNm groups rows by WB article).
-        2. Poll task status until "done".
-        3. Download the finished report.
+        The warehouse-remains report is available but not needed for the current
+        dashboard. Keeping it disabled avoids Analytics API rate limits.
         """
-        task = await self._analytics_get(
-            "/api/v1/warehouse_remains",
-            params={"groupByNm": "true"},
-        )
-        task_id = (task or {}).get("data", {}).get("taskId")
-        if not task_id:
-            raise RuntimeError(f"WB warehouse_remains: no taskId in response: {task}")
-
-        elapsed = 0.0
-        status = None
-        while elapsed < self._stocks_poll_timeout:
-            await asyncio.sleep(self._stocks_poll_interval)
-            elapsed += self._stocks_poll_interval
-            status_resp = await self._analytics_get(
-                f"/api/v1/warehouse_remains/tasks/{task_id}/status"
-            )
-            status = (status_resp or {}).get("data", {}).get("status")
-            if status == "done":
-                break
-        else:
-            raise RuntimeError(
-                f"WB warehouse_remains: task {task_id} did not finish "
-                f"within {self._stocks_poll_timeout:.0f}s (last status: {status})"
-            )
-
-        report = await self._analytics_get(
-            f"/api/v1/warehouse_remains/tasks/{task_id}/download"
-        )
-
-        stocks = []
-        for item in report or []:
-            external_id = str(item.get("nmId", ""))
-            # The grouped report does not include vendorCode; nmId is the only
-            # stable article identifier available here.
-            external_sku = external_id
-            warehouses = item.get("warehouses") or []
-
-            in_way = sum(
-                wh.get("quantity", 0)
-                for wh in warehouses
-                if wh.get("warehouseName", "").lower().startswith("в пути")
-            )
-
-            for wh in warehouses:
-                warehouse_name = wh.get("warehouseName", "Unknown")
-                # Skip the synthetic totals row; keep per-warehouse rows.
-                if "всего" in warehouse_name.lower():
-                    continue
-                stocks.append({
-                    "external_sku": external_sku,
-                    "external_id": external_id,
-                    "warehouse": warehouse_name,
-                    "quantity": wh.get("quantity", 0),
-                    "in_way": in_way,
-                })
-
-            if not warehouses:
-                stocks.append({
-                    "external_sku": external_sku,
-                    "external_id": external_id,
-                    "warehouse": "Unknown",
-                    "quantity": 0,
-                    "in_way": 0,
-                })
-        return stocks
+        logger.warning("WB stocks skipped for shop %s: not required", self.shop_id)
+        return []
 
     async def get_adverts(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         """Advertising stats are temporarily disabled for WB.
@@ -317,32 +280,68 @@ class WildberriesAdapter(MarketplaceAdapter):
         return []
 
     async def get_finance_report(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
-        """Get detailed finance report."""
+        """Get detailed finance report from the new WB Finance API.
+
+        The old /api/v5/supplier/reportDetailByPeriod was disabled in July 2026.
+        The replacement is POST /api/finance/v1/sales-reports/detailed on
+        finance-api.wildberries.ru, paginated by rrdId (204 means end of data).
+        """
         date_from_str = date_from.strftime("%Y-%m-%d")
         date_to_str = date_to.strftime("%Y-%m-%d")
 
-        data = await self._get(
-            "/api/v5/supplier/reportDetailByPeriod",
-            params={
-                "dateFrom": date_from_str,
-                "dateTo": date_to_str,
-                "limit": 100000,
-            },
-        )
+        all_rows: List[Dict[str, Any]] = []
+        last_rrd_id = 0
+        while True:
+            data = await self._finance_post(
+                "/api/finance/v1/sales-reports/detailed",
+                {
+                    "dateFrom": date_from_str,
+                    "dateTo": date_to_str,
+                    "period": "daily",
+                    "limit": 100000,
+                    "rrdId": last_rrd_id,
+                },
+            )
+            rows = data if isinstance(data, list) else []
+            if not rows:
+                break
+
+            all_rows.extend(rows)
+            last_rrd_id = rows[-1].get("rrdId", 0)
+            if len(rows) < 100000:
+                break
 
         reports = []
-        for item in data:
+        for item in all_rows:
+            doc_type = (item.get("docTypeName") or "").lower()
+            is_return = "возврат" in doc_type or "return" in doc_type
+            quantity = item.get("quantity", 0) or 0
+            if is_return and quantity > 0:
+                quantity = -quantity
+
+            revenue = Decimal(str(item.get("retailAmount", 0) or 0))
+            if is_return:
+                revenue = -abs(revenue)
+
+            # Acquisition / processing fee maps to acquiring.
+            acquiring = Decimal(str(item.get("acquiringFee", 0) or 0))
+            # If acquiringFee is empty, try legacy acquiring field names.
+            if acquiring == 0:
+                acquiring = Decimal(str(item.get("acquiring_amount", 0) or 0))
+
             reports.append({
-                "date": datetime.strptime(item.get("rr_dt", ""), "%Y-%m-%d"),
-                "external_sku": item.get("sa_name", ""),
-                "external_id": str(item.get("nm_id", "")),
-                "quantity": item.get("quantity", 0),
-                "price": Decimal(str(item.get("retail_price", 0) or 0)),
-                "revenue": Decimal(str(item.get("retail_amount", 0) or 0)),
-                "commission": Decimal(str(item.get("commission_amount", 0) or 0)),
-                "logistics": Decimal(str(item.get("delivery_rub", 0) or 0)),
-                "storage": Decimal(str(item.get("storage_fee", 0) or 0)),
-                "returns": Decimal(str(item.get("return_amount", 0) or 0)),
-                "other": Decimal(str(item.get("deduction", 0) or 0)),
+                "date": datetime.strptime(item.get("rrDate", ""), "%Y-%m-%d") if item.get("rrDate") else date_from,
+                "external_sku": str(item.get("vendorCode", "") or item.get("sa_name", "") or ""),
+                "external_id": str(item.get("srid", "") or ""),
+                "quantity": quantity,
+                "price": Decimal(str(item.get("retailPrice", 0) or 0)),
+                "revenue": revenue,
+                "commission": Decimal(str(item.get("ppvzSalesCommission", 0) or 0)),
+                "logistics": Decimal(str(item.get("deliveryService", 0) or 0)),
+                "storage": Decimal(str(item.get("paidStorage", 0) or 0)),
+                "returns": Decimal(str(item.get("returnAmount", 0) or 0)),
+                "insurance": Decimal("0"),
+                "acquiring": acquiring,
+                "other": Decimal(str(item.get("deduction", 0) or 0)) + Decimal(str(item.get("penalty", 0) or 0)),
             })
         return reports
