@@ -189,7 +189,9 @@ class OzonAdapter(MarketplaceAdapter):
             "logistics": get("delivery_rub", "delivery_amount", "logistics_amount", "logistics"),
             "storage": get("storage_amount", "storage"),
             "returns": get("return_amount", "returns", "refund_amount"),
-            "other": get("picking_amount", "price_service_amount", "acquiring_amount", "other"),
+            "insurance": get("insurance_amount", "insurance"),
+            "acquiring": get("acquiring_amount", "acquiring"),
+            "other": get("picking_amount", "price_service_amount", "other"),
         }
 
     async def get_orders(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
@@ -399,6 +401,8 @@ class OzonAdapter(MarketplaceAdapter):
                     "storage": Decimal("0"),
                     "advertising": Decimal("0"),
                     "returns": Decimal("0"),
+                    "insurance": Decimal("0"),
+                    "acquiring": Decimal("0"),
                     "other": Decimal("0"),
                 })
                 bucket["commission"] += abs(Decimal(str(op.get("sale_commission", 0) or 0)))
@@ -409,6 +413,8 @@ class OzonAdapter(MarketplaceAdapter):
                 bucket["returns"] += service_amount_by_name(services, "return")
                 bucket["storage"] += service_amount_by_name(services, "storage")
                 bucket["advertising"] += service_amount_by_name(services, "advert", "marketing")
+                bucket["insurance"] += service_amount_by_name(services, "insurance")
+                bucket["acquiring"] += service_amount_by_name(services, "acquiring")
                 continue
 
             # Skip accruals that are not expenses (positive amount, no posting).
@@ -426,15 +432,22 @@ class OzonAdapter(MarketplaceAdapter):
                 "storage": Decimal("0"),
                 "advertising": Decimal("0"),
                 "returns": Decimal("0"),
+                "insurance": Decimal("0"),
+                "acquiring": Decimal("0"),
                 "other": Decimal("0"),
             })
 
-            if op_type in ("clientreturnagentoperation", "operationreturngoodsfbsofrms") or "return" in name:
+            lowered_name = name
+            if op_type in ("clientreturnagentoperation", "operationreturngoodsfbsofrms") or "return" in lowered_name:
                 bucket["returns"] += abs(amount)
-            elif op_type in ("marketplacemarketingactioncostoperation",) or "marketing" in name or "реклама" in name:
+            elif op_type in ("marketplacemarketingactioncostoperation",) or "marketing" in lowered_name or "реклама" in lowered_name:
                 bucket["advertising"] += abs(amount)
+            elif "insurance" in lowered_name:
+                bucket["insurance"] += abs(amount)
+            elif "acquiring" in lowered_name or "эквайринг" in lowered_name:
+                bucket["acquiring"] += abs(amount)
             else:
-                # Acquiring, insurance, compensations and any other charges.
+                # Compensations and any other charges.
                 bucket["other"] += abs(amount)
 
         return [

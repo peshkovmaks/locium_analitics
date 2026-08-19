@@ -140,7 +140,7 @@ async def get_dashboard(
     # Calculate KPIs
     total_revenue = sum(s.revenue for s in sales) - sum(r.revenue for r in returns)
     total_expenses = sum(
-        s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other
+        s.commission + s.logistics + s.storage + s.advertising + s.returns + s.insurance + s.acquiring + s.other
         for s in sales
     )
     total_ads = sum(a.spend for a in adverts)
@@ -166,7 +166,7 @@ async def get_dashboard(
 
         mp_revenue = sum(s.revenue for s in mp_sales) - sum(r.revenue for r in mp_returns)
         mp_expenses = sum(
-            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other
+            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.insurance + s.acquiring + s.other
             for s in mp_sales
         )
         mp_ads = sum(a.spend for a in mp_adverts)
@@ -218,7 +218,7 @@ async def get_dashboard(
         mp = shop.marketplace.value
         rev = sum(s.revenue for s in sales if s.shop_id == shop.id)
         exp = sum(
-            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other
+            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.insurance + s.acquiring + s.other
             for s in sales
             if s.shop_id == shop.id
         )
@@ -263,7 +263,7 @@ async def get_dashboard(
         total_qty = sum(s.quantity for s in s_sales)
         total_revenue_sku = sum(s.revenue for s in s_sales)
         total_expenses_sku = sum(
-            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other
+            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.insurance + s.acquiring + s.other
             for s in s_sales
         )
         total_ads_sku = sum(s.advertising for s in s_sales)
@@ -307,7 +307,7 @@ async def get_dashboard(
         p_sales = [s for s in sales if s.external_sku == p.sku]
         p_revenue = sum(s.revenue for s in p_sales)
         p_expenses = sum(
-            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other
+            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.insurance + s.acquiring + s.other
             for s in p_sales
         )
         p_ads = sum(a.spend for a in adverts if a.external_sku == p.sku)

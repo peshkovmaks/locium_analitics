@@ -206,6 +206,8 @@ class SyncService:
                 storage=Decimal(str(item.get("storage", 0) or 0)),
                 advertising=Decimal(str(item.get("advertising", 0) or 0)),
                 returns=Decimal(str(item.get("returns", 0) or 0)),
+                insurance=Decimal(str(item.get("insurance", 0) or 0)),
+                acquiring=Decimal(str(item.get("acquiring", 0) or 0)),
                 other=Decimal(str(item.get("other", 0) or 0)),
                 is_return=is_return,
             )
@@ -221,6 +223,8 @@ class SyncService:
                     "storage": stmt.excluded.storage,
                     "advertising": stmt.excluded.advertising,
                     "returns": stmt.excluded.returns,
+                    "insurance": stmt.excluded.insurance,
+                    "acquiring": stmt.excluded.acquiring,
                     "other": stmt.excluded.other,
                     "is_return": stmt.excluded.is_return,
                 },
@@ -262,6 +266,8 @@ class SyncService:
                 "storage": Decimal(str(item.get("storage", 0) or 0)),
                 "advertising": Decimal(str(item.get("advertising", 0) or 0)),
                 "returns": Decimal(str(item.get("returns", 0) or 0)),
+                "insurance": Decimal(str(item.get("insurance", 0) or 0)),
+                "acquiring": Decimal(str(item.get("acquiring", 0) or 0)),
                 "other": Decimal(str(item.get("other", 0) or 0)),
                 "is_return": is_return,
             })
@@ -395,6 +401,8 @@ class SyncService:
                 storage=Decimal("0"),
                 advertising=Decimal("0"),
                 returns=Decimal("0"),
+                insurance=Decimal("0"),
+                acquiring=Decimal("0"),
                 other=Decimal("0"),
             )
         )
@@ -447,6 +455,8 @@ class SyncService:
                 sale.storage += Decimal(str(item.get("storage", 0) or 0)) * weight
                 sale.advertising += Decimal(str(item.get("advertising", 0) or 0)) * weight
                 sale.returns += Decimal(str(item.get("returns", 0) or 0)) * weight
+                sale.insurance += Decimal(str(item.get("insurance", 0) or 0)) * weight
+                sale.acquiring += Decimal(str(item.get("acquiring", 0) or 0)) * weight
                 sale.other += Decimal(str(item.get("other", 0) or 0)) * weight
 
     async def initial_sync(

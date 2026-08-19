@@ -154,6 +154,8 @@ class Sale(Base):
     storage = Column(Numeric(12, 2), default=0)
     advertising = Column(Numeric(12, 2), default=0)
     returns = Column(Numeric(12, 2), default=0)
+    insurance = Column(Numeric(12, 2), default=0)
+    acquiring = Column(Numeric(12, 2), default=0)
     other = Column(Numeric(12, 2), default=0)
     is_return = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)

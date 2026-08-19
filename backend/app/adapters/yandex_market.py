@@ -366,6 +366,8 @@ class YandexMarketAdapter(MarketplaceAdapter):
             "размещение товаров и услуг": "commission",
             "буст продаж": "advertising",
             "доставка покупателю": "logistics",
+            "страхование": "insurance",
+            "эквайринг": "acquiring",
             "приём платежа покупателя": "other",
             "перевод платежа покупателя": "other",
         }
@@ -439,6 +441,8 @@ class YandexMarketAdapter(MarketplaceAdapter):
                                 "storage": Decimal("0"),
                                 "advertising": Decimal("0"),
                                 "returns": Decimal("0"),
+                                "insurance": Decimal("0"),
+                                "acquiring": Decimal("0"),
                                 "other": Decimal("0"),
                             }
                         aggregated[sku][category] += amount
