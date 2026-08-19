@@ -155,7 +155,7 @@ async def get_dashboard(
     # Calculate KPIs
     total_revenue = sum(_to_decimal(s.revenue) for s in sales) - sum(_to_decimal(r.revenue) for r in returns)
     total_expenses = sum(_sale_expenses(s) for s in sales)
-    total_ads = sum(_to_decimal(a.spend) for a in adverts)
+    total_ads = sum(_to_decimal(s.advertising) for s in sales)
     total_gross = total_revenue - total_expenses
 
     # Calculate cost
@@ -213,7 +213,7 @@ async def get_dashboard(
             if s.external_sku in products
         )
         day_net = day_gross - day_cost
-        day_ads = sum(_to_decimal(a.spend) for a in day_adverts)
+        day_ads = sum(_to_decimal(s.advertising) for s in day_sales)
         day_drr = float(day_ads / day_revenue * 100) if day_revenue > 0 else 0.0
 
         revenue_trend.append(float(day_revenue))
@@ -231,7 +231,7 @@ async def get_dashboard(
 
         mp_revenue = sum(_to_decimal(s.revenue) for s in mp_sales) - sum(_to_decimal(r.revenue) for r in mp_returns)
         mp_expenses = sum(_sale_expenses(s) for s in mp_sales)
-        mp_ads = sum(_to_decimal(a.spend) for a in mp_adverts)
+        mp_ads = sum(_to_decimal(s.advertising) for s in mp_sales)
         mp_gross = mp_revenue - mp_expenses
         mp_cost = sum(
             _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
@@ -291,7 +291,7 @@ async def get_dashboard(
             if s.shop_id == shop.id and s.external_sku in products
         )
         net = gross - cost
-        ads = sum(_to_decimal(a.spend) for a in adverts if a.shop_id == shop.id)
+        ads = sum(_to_decimal(s.advertising) for s in sales if s.shop_id == shop.id)
         drr_mp = (ads / rev * 100) if rev > 0 else Decimal(0)
 
         mp_comparison.append(
@@ -382,7 +382,7 @@ async def get_dashboard(
         p_sales = [s for s in sales if s.external_sku == p.sku]
         p_revenue = sum(_to_decimal(s.revenue) for s in p_sales)
         p_expenses = sum(_sale_expenses(s) for s in p_sales)
-        p_ads = sum(_to_decimal(a.spend) for a in adverts if a.external_sku == p.sku)
+        p_ads = sum(_to_decimal(s.advertising) for s in p_sales)
         p_gross = p_revenue - p_expenses
         p_cost = _to_decimal(p.cost_price) * sum(s.quantity or 0 for s in p_sales)
         p_net = p_gross - p_cost

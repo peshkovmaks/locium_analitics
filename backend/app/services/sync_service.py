@@ -407,6 +407,8 @@ class SyncService:
             )
         )
 
+        unallocated_advertising = Decimal("0")
+
         for item in finance:
             posting_number = item.get("external_id") or item.get("posting_number")
             sku = item.get("external_sku")
@@ -436,6 +438,10 @@ class SyncService:
                 continue
 
             if not sales:
+                # Advertising is sometimes reported under an ID that does not match
+                # any sale (e.g. Ozon campaign/posting shorthand). Keep it aside and
+                # distribute across all sales by revenue.
+                unallocated_advertising += Decimal(str(item.get("advertising", 0) or 0))
                 continue
 
             total_revenue = sum((sale.revenue or Decimal(0)) for sale in sales)
@@ -458,6 +464,27 @@ class SyncService:
                 sale.insurance += Decimal(str(item.get("insurance", 0) or 0)) * weight
                 sale.acquiring += Decimal(str(item.get("acquiring", 0) or 0)) * weight
                 sale.other += Decimal(str(item.get("other", 0) or 0)) * weight
+
+        # Distribute advertising that could not be matched to specific sales.
+        if unallocated_advertising > 0:
+            result = await self.db.execute(
+                select(Sale).where(
+                    Sale.shop_id == shop_id,
+                    Sale.date >= date_from,
+                    Sale.date <= date_to,
+                )
+            )
+            all_sales = result.scalars().all()
+            total_revenue = sum((sale.revenue or Decimal(0)) for sale in all_sales)
+            if total_revenue > 0:
+                for sale in all_sales:
+                    weight = (sale.revenue or Decimal(0)) / total_revenue
+                    sale.advertising += unallocated_advertising * weight
+            elif all_sales:
+                # No revenue but rows exist; split evenly to avoid losing the expense.
+                per_sale = unallocated_advertising / len(all_sales)
+                for sale in all_sales:
+                    sale.advertising += per_sale
 
     async def initial_sync(
         self,

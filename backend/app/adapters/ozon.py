@@ -440,7 +440,18 @@ class OzonAdapter(MarketplaceAdapter):
             lowered_name = name
             if op_type in ("clientreturnagentoperation", "operationreturngoodsfbsofrms") or "return" in lowered_name:
                 bucket["returns"] += abs(amount)
-            elif op_type in ("marketplacemarketingactioncostoperation",) or "marketing" in lowered_name or "реклама" in lowered_name:
+            elif (
+                op_type
+                in (
+                    "marketplacemarketingactioncostoperation",
+                    "operationmarketplacecostperclick",
+                    "operationpromotionwithcostperorder",
+                )
+                or "marketing" in lowered_name
+                or "реклама" in lowered_name
+                or "оплата за клик" in lowered_name
+                or "продвижение с оплатой за заказ" in lowered_name
+            ):
                 bucket["advertising"] += abs(amount)
             elif "insurance" in lowered_name:
                 bucket["insurance"] += abs(amount)
