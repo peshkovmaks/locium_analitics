@@ -5,14 +5,21 @@ Auth: API token in header 'Authorization: '
 Base URL: https://statistics-api.wildberries.ru (for stats)
          https://marketplace-api.wildberries.ru (for marketplace)
          https://advert-api.wildberries.ru (for adverts)
+         https://seller-analytics-api.wildberries.ru (for analytics reports)
 
 Key endpoints:
 - GET /api/v1/supplier/sales — sales data
 - GET /api/v1/supplier/orders — orders
-- GET /api/v1/supplier/stocks — stocks
 - GET /api/v5/supplier/reportDetailByPeriod — finance report
 - POST /adv/v1/promotion/adverts — advert campaigns
 - POST /adv/v2/fullstats — advert stats
+
+NOTE (2026-08): GET /api/v1/supplier/stocks (statistics API) was disabled
+by WB on June 23, 2026. Stocks are now fetched via the async "warehouse
+remains" report on the Analytics API: create task -> poll status -> download.
+The API key used here must have the "Analytics" category enabled, in
+addition to "Statistics", or the stocks calls below will fail with 401/403.
+Release note: https://dev.wildberries.ru/en/release-notes
 """
 
 import os
@@ -37,7 +44,15 @@ class WildberriesAdapter(MarketplaceAdapter):
         "statistics": "https://statistics-api.wildberries.ru",
         "marketplace": "https://marketplace-api.wildberries.ru",
         "advert": "https://advert-api.wildberries.ru",
+        "analytics": "https://seller-analytics-api.wildberries.ru",
     }
+
+    # Warehouse-remains report: max 1/min for create+download, 1/5s for status.
+    # Far looser than the statistics API, so it must not share _min_interval/
+    # _throttle below — those are sized for the 70s statistics limit and would
+    # otherwise make each status poll wait a full extra minute.
+    _stocks_poll_interval: ClassVar[float] = 10.0
+    _stocks_poll_timeout: ClassVar[float] = 600.0  # 10 min ceiling
 
     # WB statistics API is heavily rate-limited; 70s between requests is safe.
     _min_interval: ClassVar[float] = 70.0
@@ -84,6 +99,18 @@ class WildberriesAdapter(MarketplaceAdapter):
         url = f"{self.BASE_URLS[base]}{endpoint}"
         async with self._http_client() as client:
             response = await client.post(url, headers=self.headers, json=data, timeout=30.0)
+            response.raise_for_status()
+            return response.json()
+
+    async def _analytics_get(self, endpoint: str, params: Optional[Dict] = None) -> Any:
+        """GET against the Analytics API, without the statistics _throttle.
+
+        The warehouse-remains report has its own (much looser) rate limits,
+        so it must not be serialized behind the 70s statistics interval.
+        """
+        url = f"{self.BASE_URLS['analytics']}{endpoint}"
+        async with self._http_client() as client:
+            response = await client.get(url, headers=self.headers, params=params, timeout=60.0)
             response.raise_for_status()
             return response.json()
 
@@ -167,80 +194,104 @@ class WildberriesAdapter(MarketplaceAdapter):
         return orders
 
     async def get_stocks(self) -> List[Dict[str, Any]]:
-        """Get current stock levels."""
-        data = await self._get(
-            "/api/v1/supplier/stocks",
-            params={"limit": 1000},
+        """Get current stock levels via the WB warehouse-remains report.
+
+        GET /api/v1/supplier/stocks (statistics API) was disabled by WB on
+        June 23, 2026. This is a 3-step async report on the Analytics API:
+        1. Create a report task (groupByNm groups rows by WB article).
+        2. Poll task status until "done".
+        3. Download the finished report.
+        """
+        task = await self._analytics_get(
+            "/api/v1/warehouse_remains",
+            params={"groupByNm": "true"},
+        )
+        task_id = (task or {}).get("data", {}).get("taskId")
+        if not task_id:
+            raise RuntimeError(f"WB warehouse_remains: no taskId in response: {task}")
+
+        elapsed = 0.0
+        status = None
+        while elapsed < self._stocks_poll_timeout:
+            await asyncio.sleep(self._stocks_poll_interval)
+            elapsed += self._stocks_poll_interval
+            status_resp = await self._analytics_get(
+                f"/api/v1/warehouse_remains/tasks/{task_id}/status"
+            )
+            status = (status_resp or {}).get("data", {}).get("status")
+            if status == "done":
+                break
+        else:
+            raise RuntimeError(
+                f"WB warehouse_remains: task {task_id} did not finish "
+                f"within {self._stocks_poll_timeout:.0f}s (last status: {status})"
+            )
+
+        report = await self._analytics_get(
+            f"/api/v1/warehouse_remains/tasks/{task_id}/download"
         )
 
         stocks = []
-        for item in data:
-            stocks.append({
-                "external_sku": item.get("supplierArticle", ""),
-                "external_id": str(item.get("nmId", "")),
-                "warehouse": item.get("warehouseName", "Unknown"),
-                "quantity": item.get("quantity", 0),
-                "in_way": item.get("inWayToClient", 0) + item.get("inWayFromClient", 0),
-            })
+        for item in report or []:
+            external_id = str(item.get("nmId", ""))
+            # The grouped report does not include vendorCode; nmId is the only
+            # stable article identifier available here.
+            external_sku = external_id
+            warehouses = item.get("warehouses") or []
+
+            in_way = sum(
+                wh.get("quantity", 0)
+                for wh in warehouses
+                if wh.get("warehouseName", "").lower().startswith("в пути")
+            )
+
+            for wh in warehouses:
+                warehouse_name = wh.get("warehouseName", "Unknown")
+                # Skip the synthetic totals row; keep per-warehouse rows.
+                if "всего" in warehouse_name.lower():
+                    continue
+                stocks.append({
+                    "external_sku": external_sku,
+                    "external_id": external_id,
+                    "warehouse": warehouse_name,
+                    "quantity": wh.get("quantity", 0),
+                    "in_way": in_way,
+                })
+
+            if not warehouses:
+                stocks.append({
+                    "external_sku": external_sku,
+                    "external_id": external_id,
+                    "warehouse": "Unknown",
+                    "quantity": 0,
+                    "in_way": 0,
+                })
         return stocks
 
     async def get_adverts(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
-        """Get advertising campaigns and stats."""
-        campaigns = await self._get("/adv/v1/promotion/adverts", base="advert")
+        """Advertising stats are temporarily disabled for WB.
 
-        adverts = []
-        if not campaigns:
-            return adverts
-
-        campaign_ids = [c.get("advertId") for c in campaigns if c.get("advertId")]
-
-        if campaign_ids:
-            stats = await self._post(
-                "/adv/v2/fullstats",
-                base="advert",
-                data={
-                    "id": campaign_ids,
-                    "dates": {
-                        "from": date_from.strftime("%Y-%m-%d"),
-                        "to": date_to.strftime("%Y-%m-%d"),
-                    },
-                },
-            )
-
-            for stat in stats:
-                for day_stat in stat.get("days", []):
-                    adverts.append({
-                        "date": datetime.strptime(day_stat.get("date", ""), "%Y-%m-%d"),
-                        "campaign_id": str(stat.get("advertId", "")),
-                        "external_sku": "",
-                        "views": day_stat.get("views", 0),
-                        "clicks": day_stat.get("clicks", 0),
-                        "ctr": Decimal(str(day_stat.get("ctr", 0))),
-                        "cpc": Decimal(str(day_stat.get("cpc", 0))),
-                        "spend": Decimal(str(day_stat.get("sum", 0))),
-                        "orders": day_stat.get("orders", 0),
-                        "cr": Decimal(str(day_stat.get("cr", 0))),
-                    })
-
-        return adverts
+        WB advert API requires a separate token and endpoint path that differs
+        from the statistics token currently stored in credentials. Skipping to
+        keep the overall sync healthy.
+        """
+        logger.warning(
+            "WB adverts skipped for shop %s: advert API token/endpoint not available",
+            self.shop_id,
+        )
+        return []
 
     async def get_prices(self) -> List[Dict[str, Any]]:
-        """Get current prices on WB."""
-        data = await self._get(
-            "/api/v2/list/goods/filter",
-            base="marketplace",
-            params={"limit": 1000},
-        )
+        """Current prices are temporarily disabled for WB.
 
-        prices = []
-        for item in data.get("data", {}).get("list", []):
-            prices.append({
-                "external_sku": item.get("vendorCode", ""),
-                "external_id": str(item.get("nmID", "")),
-                "price": Decimal(str(item.get("price", 0) or 0)),
-                "discount": item.get("discount", 0),
-            })
-        return prices
+        WB marketplace prices API requires a separate token/endpoint and is not
+        needed for the current dashboard. Skipping to keep the overall sync healthy.
+        """
+        logger.warning(
+            "WB prices skipped for shop %s: marketplace API token/endpoint not available",
+            self.shop_id,
+        )
+        return []
 
     async def get_finance_report(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         """Get detailed finance report."""

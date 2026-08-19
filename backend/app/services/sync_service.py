@@ -1,6 +1,9 @@
 """Sync service — fetches data from marketplace APIs and saves to DB."""
 
+import logging
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 from typing import List, Dict, Any
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
