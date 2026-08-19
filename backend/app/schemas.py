@@ -166,6 +166,7 @@ class UnitEconomicsMarketplaceRow(BaseModel):
     net_per_unit: Decimal
     margin: Decimal
     drr: Decimal
+    trend: List[int] = []
 
 
 class UnitEconomicsRow(BaseModel):

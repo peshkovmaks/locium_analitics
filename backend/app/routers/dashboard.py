@@ -255,6 +255,23 @@ async def get_dashboard(
         key = (s.external_sku, s.shop_id)
         sku_sales.setdefault(key, []).append(s)
 
+    # Build daily revenue trend for each (sku, shop) pair over the selected period
+    trend_dates = []
+    current_day = start_dt.date()
+    end_day = end_dt.date()
+    while current_day <= end_day:
+        trend_dates.append(current_day)
+        current_day += timedelta(days=1)
+
+    daily_revenue: Dict[tuple, Dict[date, Decimal]] = {}
+    for s in sales:
+        key = (s.external_sku, s.shop_id)
+        day = s.date.date() if s.date else None
+        if day is None:
+            continue
+        daily_revenue.setdefault(key, {})
+        daily_revenue[key][day] = daily_revenue[key].get(day, Decimal(0)) + _to_decimal(s.revenue)
+
     product_unit_map: Dict[str, dict] = {}
     for (external_sku, shop_id), s_sales in sku_sales.items():
         if external_sku not in products:
@@ -284,6 +301,11 @@ async def get_dashboard(
                 "rows": [],
             }
 
+        trend = [
+            int(daily_revenue.get((external_sku, shop_id), {}).get(day, Decimal(0)))
+            for day in trend_dates
+        ]
+
         product_unit_map[p.sku]["rows"].append(
             UnitEconomicsMarketplaceRow(
                 marketplace=MP_NAMES.get(mp, mp),
@@ -294,6 +316,7 @@ async def get_dashboard(
                 net_per_unit=net_per,
                 margin=margin,
                 drr=drr_sku,
+                trend=trend,
             )
         )
 

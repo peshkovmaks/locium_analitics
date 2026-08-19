@@ -86,6 +86,37 @@ function useChart(createFn) {
   return canvasRef;
 }
 
+function MiniSparkline({ values, color = '#3b82f6' }) {
+  const createChart = useMemo(() => (canvas) => {
+    const ctx = canvas.getContext('2d');
+    return new window.Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: values.map((_, i) => i),
+        datasets: [{
+          data: values,
+          borderColor: color,
+          backgroundColor: color,
+          borderWidth: 2,
+          tension: 0.3,
+          pointRadius: 0,
+          fill: false,
+        }],
+      },
+      options: {
+        responsive: false,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: { x: { display: false }, y: { display: false } },
+        layout: { padding: 0 },
+      },
+    });
+  }, [values, color]);
+
+  const ref = useChart(createChart);
+  return <canvas ref={ref} width={80} height={30} />;
+}
+
 function RevenueLineChart({ data }) {
   const labels = useMemo(() => {
     const days = [];
@@ -294,13 +325,14 @@ function UnitEconomicsTable({ rows }) {
             <th className="text-right py-2 font-normal">Расх. МП</th>
             <th className="text-right py-2 font-normal">Чистая/шт</th>
             <th className="text-right py-2 font-normal">Маржа</th>
+            <th className="text-right py-2 font-normal">Тренд</th>
             <th className="text-right py-2 font-normal">ДРР</th>
           </tr>
         </thead>
         {rows.map((product) => (
           <tbody key={product.sku} className="border-b-2 border-gray-100">
             <tr className="bg-gray-50/70">
-              <td className="py-2 px-3 font-semibold text-gray-900" colSpan="8">
+              <td className="py-2 px-3 font-semibold text-gray-900" colSpan="9">
                 {product.name}
                 <span className="text-xs text-gray-400 font-normal ml-2">
                   {product.sku} · себест. {formatMoney(product.cost)}
@@ -332,6 +364,9 @@ function UnitEconomicsTable({ rows }) {
                     <span className={classNames('px-2 py-0.5 rounded-full text-xs', margin >= 25 ? 'bg-green-100 text-green-700' : margin >= 15 ? 'bg-gray-100 text-gray-700' : 'bg-red-100 text-red-700')}>
                       {formatPercent(margin)}
                     </span>
+                  </td>
+                  <td className="text-right">
+                    <MiniSparkline values={r.trend || []} color={MP_COLORS[key]} />
                   </td>
                   <td className="text-right">
                     <span className={classNames('px-2 py-0.5 rounded-full text-xs', drr <= 10 ? 'bg-green-100 text-green-700' : drr <= 15 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700')}>
