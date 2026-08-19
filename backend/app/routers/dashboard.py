@@ -168,6 +168,14 @@ async def get_dashboard(
     total_net = total_gross - total_cost
     drr = (total_ads / total_revenue * 100) if total_revenue > 0 else Decimal(0)
 
+    # Build date range for all trends
+    trend_dates = []
+    current_day = start_dt.date()
+    end_day = end_dt.date()
+    while current_day <= end_day:
+        trend_dates.append(current_day)
+        current_day += timedelta(days=1)
+
     # Build daily KPI trend for sparklines
     sales_by_day: Dict[date, List[Sale]] = {}
     for s in sales:
@@ -305,13 +313,6 @@ async def get_dashboard(
         sku_sales.setdefault(key, []).append(s)
 
     # Build daily revenue trend for each (sku, shop) pair over the selected period
-    trend_dates = []
-    current_day = start_dt.date()
-    end_day = end_dt.date()
-    while current_day <= end_day:
-        trend_dates.append(current_day)
-        current_day += timedelta(days=1)
-
     daily_revenue: Dict[tuple, Dict[date, Decimal]] = {}
     for s in sales:
         key = (s.external_sku, s.shop_id)
