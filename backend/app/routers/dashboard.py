@@ -137,13 +137,25 @@ async def get_dashboard(
     stocks_result = await db.execute(select(Stock).where(Stock.shop_id.in_(shop_ids)))
     stocks = stocks_result.scalars().all()
 
+    def _to_decimal(value) -> Decimal:
+        return Decimal(str(value or 0))
+
+    def _sale_expenses(s: Sale) -> Decimal:
+        return (
+            _to_decimal(s.commission)
+            + _to_decimal(s.logistics)
+            + _to_decimal(s.storage)
+            + _to_decimal(s.advertising)
+            + _to_decimal(s.returns)
+            + _to_decimal(s.insurance)
+            + _to_decimal(s.acquiring)
+            + _to_decimal(s.other)
+        )
+
     # Calculate KPIs
-    total_revenue = sum(s.revenue for s in sales) - sum(r.revenue for r in returns)
-    total_expenses = sum(
-        s.commission + s.logistics + s.storage + s.advertising + s.returns + s.insurance + s.acquiring + s.other
-        for s in sales
-    )
-    total_ads = sum(a.spend for a in adverts)
+    total_revenue = sum(_to_decimal(s.revenue) for s in sales) - sum(_to_decimal(r.revenue) for r in returns)
+    total_expenses = sum(_sale_expenses(s) for s in sales)
+    total_ads = sum(_to_decimal(a.spend) for a in adverts)
     total_gross = total_revenue - total_expenses
 
     # Calculate cost
@@ -151,7 +163,7 @@ async def get_dashboard(
     for s in sales:
         sku = s.external_sku
         if sku in products:
-            total_cost += products[sku].cost_price * s.quantity
+            total_cost += _to_decimal(products[sku].cost_price) * (s.quantity or 0)
 
     total_net = total_gross - total_cost
     drr = (total_ads / total_revenue * 100) if total_revenue > 0 else Decimal(0)
@@ -164,15 +176,12 @@ async def get_dashboard(
         mp_returns = [r for r in returns if r.shop_id == shop.id]
         mp_adverts = [a for a in adverts if a.shop_id == shop.id]
 
-        mp_revenue = sum(s.revenue for s in mp_sales) - sum(r.revenue for r in mp_returns)
-        mp_expenses = sum(
-            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.insurance + s.acquiring + s.other
-            for s in mp_sales
-        )
-        mp_ads = sum(a.spend for a in mp_adverts)
+        mp_revenue = sum(_to_decimal(s.revenue) for s in mp_sales) - sum(_to_decimal(r.revenue) for r in mp_returns)
+        mp_expenses = sum(_sale_expenses(s) for s in mp_sales)
+        mp_ads = sum(_to_decimal(a.spend) for a in mp_adverts)
         mp_gross = mp_revenue - mp_expenses
         mp_cost = sum(
-            products[s.external_sku].cost_price * s.quantity
+            _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
             for s in mp_sales
             if s.external_sku in products
         )
@@ -216,20 +225,16 @@ async def get_dashboard(
     mp_comparison: List[MarketplaceComparison] = []
     for shop in shops:
         mp = shop.marketplace.value
-        rev = sum(s.revenue for s in sales if s.shop_id == shop.id)
-        exp = sum(
-            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.insurance + s.acquiring + s.other
-            for s in sales
-            if s.shop_id == shop.id
-        )
+        rev = sum(_to_decimal(s.revenue) for s in sales if s.shop_id == shop.id)
+        exp = sum(_sale_expenses(s) for s in sales if s.shop_id == shop.id)
         gross = rev - exp
         cost = sum(
-            products[s.external_sku].cost_price * s.quantity
+            _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
             for s in sales
             if s.shop_id == shop.id and s.external_sku in products
         )
         net = gross - cost
-        ads = sum(a.spend for a in adverts if a.shop_id == shop.id)
+        ads = sum(_to_decimal(a.spend) for a in adverts if a.shop_id == shop.id)
         drr_mp = (ads / rev * 100) if rev > 0 else Decimal(0)
 
         mp_comparison.append(
@@ -260,17 +265,14 @@ async def get_dashboard(
             continue
         mp = shop.marketplace.value
 
-        total_qty = sum(s.quantity for s in s_sales)
-        total_revenue_sku = sum(s.revenue for s in s_sales)
-        total_expenses_sku = sum(
-            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.insurance + s.acquiring + s.other
-            for s in s_sales
-        )
-        total_ads_sku = sum(s.advertising for s in s_sales)
+        total_qty = sum(s.quantity or 0 for s in s_sales)
+        total_revenue_sku = sum(_to_decimal(s.revenue) for s in s_sales)
+        total_expenses_sku = sum(_sale_expenses(s) for s in s_sales)
+        total_ads_sku = sum(_to_decimal(s.advertising) for s in s_sales)
 
         avg_price = (total_revenue_sku / total_qty) if total_qty > 0 else Decimal(0)
         expense_per_unit = (total_expenses_sku / total_qty) if total_qty > 0 else Decimal(0)
-        net_per = avg_price - p.cost_price - expense_per_unit
+        net_per = avg_price - _to_decimal(p.cost_price) - expense_per_unit
         margin = (net_per / avg_price * 100) if avg_price > 0 else Decimal(0)
         drr_sku = (total_ads_sku / total_revenue_sku * 100) if total_revenue_sku > 0 else Decimal(0)
 
@@ -278,7 +280,7 @@ async def get_dashboard(
             product_unit_map[p.sku] = {
                 "sku": p.sku,
                 "name": p.name,
-                "cost": p.cost_price,
+                "cost": _to_decimal(p.cost_price),
                 "rows": [],
             }
 
@@ -305,14 +307,11 @@ async def get_dashboard(
     product_rows: List[ProductDashboardRow] = []
     for p in products.values():
         p_sales = [s for s in sales if s.external_sku == p.sku]
-        p_revenue = sum(s.revenue for s in p_sales)
-        p_expenses = sum(
-            s.commission + s.logistics + s.storage + s.advertising + s.returns + s.insurance + s.acquiring + s.other
-            for s in p_sales
-        )
-        p_ads = sum(a.spend for a in adverts if a.external_sku == p.sku)
+        p_revenue = sum(_to_decimal(s.revenue) for s in p_sales)
+        p_expenses = sum(_sale_expenses(s) for s in p_sales)
+        p_ads = sum(_to_decimal(a.spend) for a in adverts if a.external_sku == p.sku)
         p_gross = p_revenue - p_expenses
-        p_cost = p.cost_price * sum(s.quantity for s in p_sales)
+        p_cost = _to_decimal(p.cost_price) * sum(s.quantity or 0 for s in p_sales)
         p_net = p_gross - p_cost
         p_margin = (p_net / p_revenue * 100) if p_revenue > 0 else Decimal(0)
         p_drr = (p_ads / p_revenue * 100) if p_revenue > 0 else Decimal(0)
