@@ -168,6 +168,51 @@ async def get_dashboard(
     total_net = total_gross - total_cost
     drr = (total_ads / total_revenue * 100) if total_revenue > 0 else Decimal(0)
 
+    # Build daily KPI trend for sparklines
+    sales_by_day: Dict[date, List[Sale]] = {}
+    for s in sales:
+        day = s.date.date() if s.date else None
+        if day:
+            sales_by_day.setdefault(day, []).append(s)
+
+    returns_by_day: Dict[date, List[Sale]] = {}
+    for r in returns:
+        day = r.date.date() if r.date else None
+        if day:
+            returns_by_day.setdefault(day, []).append(r)
+
+    adverts_by_day: Dict[date, List[Advert]] = {}
+    for a in adverts:
+        day = a.date.date() if a.date else None
+        if day:
+            adverts_by_day.setdefault(day, []).append(a)
+
+    revenue_trend = []
+    gross_trend = []
+    net_trend = []
+    drr_trend = []
+    for day in trend_dates:
+        day_sales = sales_by_day.get(day, [])
+        day_returns = returns_by_day.get(day, [])
+        day_adverts = adverts_by_day.get(day, [])
+
+        day_revenue = sum(_to_decimal(s.revenue) for s in day_sales) - sum(_to_decimal(r.revenue) for r in day_returns)
+        day_expenses = sum(_sale_expenses(s) for s in day_sales)
+        day_gross = day_revenue - day_expenses
+        day_cost = sum(
+            _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
+            for s in day_sales
+            if s.external_sku in products
+        )
+        day_net = day_gross - day_cost
+        day_ads = sum(_to_decimal(a.spend) for a in day_adverts)
+        day_drr = float(day_ads / day_revenue * 100) if day_revenue > 0 else 0.0
+
+        revenue_trend.append(float(day_revenue))
+        gross_trend.append(float(day_gross))
+        net_trend.append(float(day_net))
+        drr_trend.append(day_drr)
+
     # Calculate KPI breakdown by marketplace
     kpi_by_marketplace: List[MarketplaceKPI] = []
     for shop in shops:
@@ -209,6 +254,10 @@ async def get_dashboard(
         net_wow=-3.0,
         drr_wow=-1.2,
         by_marketplace=kpi_by_marketplace,
+        revenue_trend=revenue_trend,
+        gross_trend=gross_trend,
+        net_trend=net_trend,
+        drr_trend=drr_trend,
     )
 
     # Alerts

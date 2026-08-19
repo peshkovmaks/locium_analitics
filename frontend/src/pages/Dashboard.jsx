@@ -41,7 +41,7 @@ function Badge({ children, color }) {
   );
 }
 
-function KPICard({ label, value, wow, wowColor, breakdown }) {
+function KPICard({ label, value, wow, wowColor, breakdown, sparklineData, sparklineColor = '#3b82f6' }) {
   return (
     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
       <p className="text-sm text-gray-500 mb-1">{label}</p>
@@ -57,6 +57,11 @@ function KPICard({ label, value, wow, wowColor, breakdown }) {
               <span className="font-medium">{item.value}</span>
             </div>
           ))}
+        </div>
+      )}
+      {sparklineData && sparklineData.length > 0 && (
+        <div className="mt-3">
+          <MiniSparkline values={sparklineData} color={sparklineColor} />
         </div>
       )}
       <p className={classNames('text-sm mt-3 font-medium', wowColor)}>{wow}</p>
@@ -228,31 +233,89 @@ function ExpenseStructureChart({ totalRevenue, mpData }) {
   return <canvas ref={ref} />;
 }
 
-function DRRBars({ data }) {
-  const max = useMemo(() => Math.max(...data.map((d) => Number(d.drr)), 15), [data]);
+function DRRBarChart({ data }) {
+  const createChart = useMemo(() => (canvas) => {
+    const ctx = canvas.getContext('2d');
+    const values = data.map((d) => Number(d.drr));
+    const max = Math.max(...values, 15);
+
+    return new window.Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.map((d) => d.marketplace),
+        datasets: [{
+          data: values,
+          backgroundColor: data.map((d) => MP_COLORS[d.key] || '#9ca3af'),
+          borderRadius: 4,
+          barThickness: 20,
+        }],
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `ДРР: ${ctx.raw.toFixed(1)}%`,
+            },
+          },
+          annotation: {
+            annotations: {
+              targetLine: {
+                type: 'line',
+                xMin: 10,
+                xMax: 10,
+                borderColor: '#ef4444',
+                borderWidth: 2,
+                borderDash: [6, 4],
+                label: {
+                  content: 'Цель 10%',
+                  enabled: true,
+                  position: 'start',
+                  backgroundColor: 'rgba(239, 68, 68, 0.9)',
+                  color: '#fff',
+                  font: { size: 10 },
+                },
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            min: 0,
+            max: max,
+            grid: { color: '#f3f4f6' },
+            ticks: { callback: (v) => `${v}%` },
+          },
+          y: { grid: { display: false } },
+        },
+      },
+      plugins: [{
+        id: 'targetLineFallback',
+        afterDraw: (chart) => {
+          if (window.Chart.annotation) return;
+          const { ctx, scales: { x, y } } = chart;
+          const xPos = x.getPixelForValue(10);
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(xPos, y.top);
+          ctx.lineTo(xPos, y.bottom);
+          ctx.strokeStyle = '#ef4444';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          ctx.stroke();
+          ctx.restore();
+        },
+      }],
+    });
+  }, [data]);
+
+  const ref = useChart(createChart);
   return (
-    <div className="space-y-3">
-      {data.map((mp) => {
-        const drr = Number(mp.drr);
-        const ok = drr <= 10;
-        return (
-          <div key={mp.key}>
-            <div className="flex justify-between text-xs mb-1">
-              <span className="text-gray-600">{mp.marketplace}</span>
-              <span className={classNames('font-medium', ok ? 'text-green-600' : 'text-red-600')}>
-                {formatPercent(drr)}
-              </span>
-            </div>
-            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full"
-                style={{ width: `${Math.min((drr / max) * 100, 100)}%`, background: MP_COLORS[mp.key] }}
-              />
-            </div>
-          </div>
-        );
-      })}
-      <div className="mt-3 pt-2 border-t text-xs text-gray-400">Целевой ДРР: ≤ 10%</div>
+    <div className="h-48">
+      <canvas ref={ref} />
     </div>
   );
 }
@@ -469,21 +532,26 @@ export default function Dashboard() {
   const [marketplace, setMarketplace] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
+  const loadData = () => {
     setLoading(true);
     setError('');
-    const start = startDate || null;
-    const end = endDate || null;
+    const start = dateRange.start || null;
+    const end = dateRange.end || null;
     dashboard
       .getData(period, marketplace, start, end)
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [period, marketplace, startDate, endDate]);
+  };
+
+  useEffect(() => {
+    loadData();
+  }, [period, marketplace, dateRange]);
 
   const kpi = data?.kpi;
   const mpRows = data?.marketplace_comparison || [];
@@ -529,10 +597,11 @@ export default function Dashboard() {
                   setPeriod(p.key);
                   setStartDate('');
                   setEndDate('');
+                  setDateRange({ start: '', end: '' });
                 }}
                 className={classNames(
                   'px-3 py-1.5 rounded-md font-medium transition',
-                  period === p.key && !startDate && !endDate
+                  period === p.key && !dateRange.start && !dateRange.end
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-700 hover:bg-gray-100'
                 )}
@@ -556,6 +625,13 @@ export default function Dashboard() {
               onChange={(e) => setEndDate(e.target.value)}
               className="border rounded-lg px-2 py-1.5 bg-white text-gray-700"
             />
+            <button
+              onClick={() => setDateRange({ start: startDate, end: endDate })}
+              disabled={!startDate || !endDate}
+              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700 transition"
+            >
+              Применить
+            </button>
           </div>
           <select
             value={marketplace}
@@ -584,6 +660,8 @@ export default function Dashboard() {
               kpi.by_marketplace.find((x) => x.marketplace === mp.marketplace)?.revenue || 0
             ),
           }))}
+          sparklineData={kpi.revenue_trend}
+          sparklineColor="#3b82f6"
         />
         <KPICard
           label="Валовая прибыль"
@@ -597,6 +675,8 @@ export default function Dashboard() {
               kpi.by_marketplace.find((x) => x.marketplace === mp.marketplace)?.gross_profit || 0
             ),
           }))}
+          sparklineData={kpi.gross_trend}
+          sparklineColor="#22c55e"
         />
         <KPICard
           label="Чистая прибыль"
@@ -610,6 +690,8 @@ export default function Dashboard() {
               kpi.by_marketplace.find((x) => x.marketplace === mp.marketplace)?.net_profit || 0
             ),
           }))}
+          sparklineData={kpi.net_trend}
+          sparklineColor="#16a34a"
         />
         <KPICard
           label="ДРР"
@@ -623,6 +705,8 @@ export default function Dashboard() {
               kpi.by_marketplace.find((x) => x.marketplace === mp.marketplace)?.drr || 0
             ),
           }))}
+          sparklineData={kpi.drr_trend}
+          sparklineColor="#ef4444"
         />
       </div>
 
@@ -697,7 +781,7 @@ export default function Dashboard() {
         </div>
         <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
           <h3 className="font-semibold mb-4">ДРР по площадкам</h3>
-          <DRRBars data={mpRowsWithKeys} />
+          <DRRBarChart data={mpRowsWithKeys} />
         </div>
       </div>
 

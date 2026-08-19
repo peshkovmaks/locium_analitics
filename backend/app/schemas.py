@@ -145,6 +145,10 @@ class KPIData(BaseModel):
     net_wow: float
     drr_wow: float
     by_marketplace: List[MarketplaceKPI]
+    revenue_trend: List[float] = []
+    gross_trend: List[float] = []
+    net_trend: List[float] = []
+    drr_trend: List[float] = []
 
 
 class MarketplaceComparison(BaseModel):
