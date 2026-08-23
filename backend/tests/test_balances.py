@@ -68,7 +68,7 @@ class TestYandexMarketAdapter:
 
 
 class TestListBalances:
-    async def test_ym_shop_without_balance_shows_zero(self, client, ym_shop):
+    async def test_ym_shop_without_balance_is_not_supported(self, client, ym_shop):
         response = await client.get("/api/v1/balances/")
 
         assert response.status_code == 200
@@ -76,7 +76,7 @@ class TestListBalances:
         ym_item = next((i for i in items if i["shop_id"] == str(ym_shop.id)), None)
         assert ym_item is not None
         assert ym_item["marketplace"] == "ym"
-        assert float(ym_item["balance"]) == 0
+        assert ym_item["balance"] == "not_supported"
 
     async def test_ym_shop_with_not_supported_flag(self, client, ym_shop, db_session):
         db_session.add(

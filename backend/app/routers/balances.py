@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import Shop, ShopBalance
+from app.models import Marketplace, Shop, ShopBalance
 from app.schemas import BalanceOut
 from app.auth import get_current_user
 
@@ -37,6 +37,9 @@ async def list_balances(
             balance_value = "not_supported"
         elif balance:
             balance_value = balance.balance
+        elif shop.marketplace == Marketplace.yandex_market:
+            # Yandex Market does not expose current balance via its API.
+            balance_value = "not_supported"
         else:
             balance_value = Decimal("0")
         balances.append({
