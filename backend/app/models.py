@@ -151,6 +151,7 @@ class Sale(Base):
         UniqueConstraint("shop_id", "external_id", "external_sku", name="uix_sale_order_sku"),
     )
     price = Column(Numeric(12, 2), default=0)
+    customer_price = Column(Numeric(12, 2), default=0)
     revenue = Column(Numeric(12, 2), default=0)
     commission = Column(Numeric(12, 2), default=0)
     logistics = Column(Numeric(12, 2), default=0)

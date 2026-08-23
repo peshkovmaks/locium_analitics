@@ -141,6 +141,7 @@ class SyncLogOut(BaseModel):
 class MarketplaceKPI(BaseModel):
     marketplace: str
     revenue: Decimal
+    actual_revenue: Decimal
     gross_profit: Decimal
     net_profit: Decimal
     drr: Decimal
@@ -148,6 +149,7 @@ class MarketplaceKPI(BaseModel):
 
 class KPIData(BaseModel):
     revenue: Decimal
+    actual_revenue: Decimal
     gross_profit: Decimal
     net_profit: Decimal
     drr: Decimal
@@ -157,6 +159,7 @@ class KPIData(BaseModel):
     drr_wow: float
     by_marketplace: List[MarketplaceKPI]
     revenue_trend: List[float] = []
+    actual_revenue_trend: List[float] = []
     gross_trend: List[float] = []
     net_trend: List[float] = []
     drr_trend: List[float] = []

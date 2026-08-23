@@ -390,7 +390,7 @@ function UnitEconomicsTable({ rows }) {
           <tr>
             <th className="text-left py-2 font-normal">Площадка</th>
             <th className="text-right py-2 font-normal">Продано</th>
-            <th className="text-right py-2 font-normal">Цена</th>
+            <th className="text-right py-2 font-normal">Средняя цена</th>
             <th className="text-right py-2 font-normal">Себест.</th>
             <th className="text-right py-2 font-normal">Расх. МП</th>
             <th className="text-right py-2 font-normal">Чистая/шт</th>
@@ -499,7 +499,7 @@ function ProductsTable({ rows }) {
             <th className="text-right py-2 font-normal">Чистая</th>
             <th className="text-right py-2 font-normal">Маржа</th>
             <th className="text-right py-2 font-normal">ДРР</th>
-            <th className="text-right py-2 font-normal">Цена</th>
+            <th className="text-right py-2 font-normal">Средняя цена</th>
             <th className="text-right py-2 font-normal">Мин. цена</th>
             <th className="text-right py-2 font-normal">Остаток</th>
           </tr>
@@ -744,7 +744,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPI */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <KPICard
           label="Выручка"
           value={formatMoney(kpi.revenue)}
@@ -759,6 +759,21 @@ export default function Dashboard() {
           }))}
           sparklineData={kpi.revenue_trend}
           sparklineColor="#3b82f6"
+        />
+        <KPICard
+          label="Фактическая выручка"
+          value={formatMoney(kpi.actual_revenue)}
+          wow={`${kpi.revenue_wow > 0 ? '+' : ''}${kpi.revenue_wow}% к прошлой неделе`}
+          wowColor={kpi.revenue_wow >= 0 ? 'text-green-600' : 'text-red-600'}
+          breakdown={kpiBreakdown.map((mp) => ({
+            marketplace: mp.marketplace,
+            color: mp.color,
+            value: formatMoney(
+              kpi.by_marketplace.find((x) => x.marketplace === mp.marketplace)?.actual_revenue || 0
+            ),
+          }))}
+          sparklineData={kpi.actual_revenue_trend || kpi.revenue_trend}
+          sparklineColor="#0ea5e9"
         />
         <KPICard
           label="Валовая прибыль"

@@ -141,7 +141,7 @@ class OzonAdapter(MarketplaceAdapter):
                         },
                         "limit": limit,
                         "offset": offset,
-                        "with": {"analytics_data": True},
+                        "with": {"analytics_data": True, "financial_data": True},
                     },
                 )
 
@@ -161,18 +161,34 @@ class OzonAdapter(MarketplaceAdapter):
 
         return all_items
 
-    def _extract_posting_expenses(self, item: Dict[str, Any], product: Dict[str, Any]) -> Dict[str, Decimal]:
-        """Extract per-product expenses from Ozon posting analytics_data."""
-        analytics = item.get("analytics_data") or {}
-        financial = analytics.get("financial_data") or {}
+    def _get_product_financial(
+        self, item: Dict[str, Any], product: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Return the financial_data row matching this product.
 
-        # Find product-specific financial row by sku/offer_id if present
+        Ozon uses ``product_id`` inside financial_data, which corresponds to
+        the ``sku`` field (Ozon product id) in the posting's product object.
+        """
+        financial = item.get("financial_data") or {}
         offer_id = str(product.get("offer_id", ""))
-        product_financial = None
+        sku = product.get("sku")
         for fp in financial.get("products", []) or []:
-            if str(fp.get("offer_id", "")) == offer_id or str(fp.get("sku", "")) == offer_id:
-                product_financial = fp
-                break
+            fp_offer_id = str(fp.get("offer_id", ""))
+            fp_sku = fp.get("sku")
+            fp_product_id = fp.get("product_id")
+            if (
+                (offer_id and fp_offer_id and fp_offer_id == offer_id)
+                or (sku is not None and fp_sku is not None and str(fp_sku) == str(sku))
+                or (sku is not None and fp_product_id is not None and str(fp_product_id) == str(sku))
+            ):
+                return fp
+        return None
+
+    def _extract_posting_expenses(self, item: Dict[str, Any], product: Dict[str, Any]) -> Dict[str, Decimal]:
+        """Extract per-product expenses from Ozon posting financial_data."""
+        analytics = item.get("analytics_data") or {}
+        financial = item.get("financial_data") or {}
+        product_financial = self._get_product_financial(item, product)
 
         def get(*keys):
             for src in ([product_financial] if product_financial else []) + [financial, analytics]:
@@ -206,13 +222,17 @@ class OzonAdapter(MarketplaceAdapter):
             for product in item.get("products", []):
                 expenses = self._extract_posting_expenses(item, product)
                 quantity = product.get("quantity", 1)
-                price = Decimal(str(product.get("price", "0") or "0"))
+                pf = self._get_product_financial(item, product)
+                # Use financial_data price when available; fallback to posting price.
+                price = Decimal(str(pf.get("price", product.get("price", "0")) if pf else product.get("price", "0") or "0"))
+                customer_price = Decimal(str(pf.get("customer_price", 0) or 0)) if pf else Decimal(0)
                 orders.append({
                     "date": created_at,
                     "external_sku": str(product.get("offer_id", "")),
                     "external_id": posting_number,
                     "quantity": quantity,
                     "price": price,
+                    "customer_price": customer_price,
                     "revenue": price * quantity,
                     "status": item.get("status", ""),
                     **expenses,
@@ -227,13 +247,16 @@ class OzonAdapter(MarketplaceAdapter):
             for product in item.get("products", []):
                 expenses = self._extract_posting_expenses(item, product)
                 quantity = product.get("quantity", 1)
-                price = Decimal(str(product.get("price", "0") or "0"))
+                pf = self._get_product_financial(item, product)
+                price = Decimal(str(pf.get("price", product.get("price", "0")) if pf else product.get("price", "0") or "0"))
+                customer_price = Decimal(str(pf.get("customer_price", 0) or 0)) if pf else Decimal(0)
                 orders.append({
                     "date": created_at,
                     "external_sku": str(product.get("offer_id", "")),
                     "external_id": posting_number,
                     "quantity": quantity,
                     "price": price,
+                    "customer_price": customer_price,
                     "revenue": price * quantity,
                     "status": item.get("status", ""),
                     **expenses,

@@ -152,8 +152,16 @@ async def get_dashboard(
             + _to_decimal(s.other)
         )
 
+    def _customer_revenue(s: Sale) -> Decimal:
+        """Revenue at the price actually paid by the customer."""
+        cp = _to_decimal(s.customer_price)
+        if cp > 0:
+            return cp * (s.quantity or 0)
+        return _to_decimal(s.revenue)
+
     # Calculate KPIs
     total_revenue = sum(_to_decimal(s.revenue) for s in sales) - sum(_to_decimal(r.revenue) for r in returns)
+    total_actual_revenue = sum(_customer_revenue(s) for s in sales) - sum(_customer_revenue(r) for r in returns)
     total_expenses = sum(_sale_expenses(s) for s in sales)
     total_ads = sum(_to_decimal(s.advertising) for s in sales)
     total_gross = total_revenue - total_expenses
@@ -196,6 +204,7 @@ async def get_dashboard(
             adverts_by_day.setdefault(day, []).append(a)
 
     revenue_trend = []
+    actual_revenue_trend = []
     gross_trend = []
     net_trend = []
     drr_trend = []
@@ -205,6 +214,7 @@ async def get_dashboard(
         day_adverts = adverts_by_day.get(day, [])
 
         day_revenue = sum(_to_decimal(s.revenue) for s in day_sales) - sum(_to_decimal(r.revenue) for r in day_returns)
+        day_actual_revenue = sum(_customer_revenue(s) for s in day_sales) - sum(_customer_revenue(r) for r in day_returns)
         day_expenses = sum(_sale_expenses(s) for s in day_sales)
         day_gross = day_revenue - day_expenses
         day_cost = sum(
@@ -217,6 +227,7 @@ async def get_dashboard(
         day_drr = float(day_ads / day_revenue * 100) if day_revenue > 0 else 0.0
 
         revenue_trend.append(float(day_revenue))
+        actual_revenue_trend.append(float(day_actual_revenue))
         gross_trend.append(float(day_gross))
         net_trend.append(float(day_net))
         drr_trend.append(day_drr)
@@ -230,6 +241,7 @@ async def get_dashboard(
         mp_adverts = [a for a in adverts if a.shop_id == shop.id]
 
         mp_revenue = sum(_to_decimal(s.revenue) for s in mp_sales) - sum(_to_decimal(r.revenue) for r in mp_returns)
+        mp_actual_revenue = sum(_customer_revenue(s) for s in mp_sales) - sum(_customer_revenue(r) for r in mp_returns)
         mp_expenses = sum(_sale_expenses(s) for s in mp_sales)
         mp_ads = sum(_to_decimal(s.advertising) for s in mp_sales)
         mp_gross = mp_revenue - mp_expenses
@@ -245,6 +257,7 @@ async def get_dashboard(
             MarketplaceKPI(
                 marketplace=MP_NAMES.get(mp, mp),
                 revenue=mp_revenue,
+                actual_revenue=mp_actual_revenue,
                 gross_profit=mp_gross,
                 net_profit=mp_net,
                 drr=mp_drr,
@@ -254,6 +267,7 @@ async def get_dashboard(
     # Mock WoW (in production: compare with previous period)
     kpi = KPIData(
         revenue=total_revenue,
+        actual_revenue=total_actual_revenue,
         gross_profit=total_gross,
         net_profit=total_net,
         drr=drr,
@@ -314,6 +328,7 @@ async def get_dashboard(
 
     # Build daily revenue trend for each (sku, shop) pair over the selected period
     daily_revenue: Dict[tuple, Dict[date, Decimal]] = {}
+    daily_actual_revenue: Dict[tuple, Dict[date, Decimal]] = {}
     for s in sales:
         key = (s.external_sku, s.shop_id)
         day = s.date.date() if s.date else None
@@ -321,6 +336,8 @@ async def get_dashboard(
             continue
         daily_revenue.setdefault(key, {})
         daily_revenue[key][day] = daily_revenue[key].get(day, Decimal(0)) + _to_decimal(s.revenue)
+        daily_actual_revenue.setdefault(key, {})
+        daily_actual_revenue[key][day] = daily_actual_revenue[key].get(day, Decimal(0)) + _customer_revenue(s)
 
     product_unit_map: Dict[str, dict] = {}
     for (external_sku, shop_id), s_sales in sku_sales.items():
@@ -334,10 +351,11 @@ async def get_dashboard(
 
         total_qty = sum(s.quantity or 0 for s in s_sales)
         total_revenue_sku = sum(_to_decimal(s.revenue) for s in s_sales)
+        total_actual_revenue_sku = sum(_customer_revenue(s) for s in s_sales)
         total_expenses_sku = sum(_sale_expenses(s) for s in s_sales)
         total_ads_sku = sum(_to_decimal(s.advertising) for s in s_sales)
 
-        avg_price = (total_revenue_sku / total_qty) if total_qty > 0 else Decimal(0)
+        avg_price = (total_actual_revenue_sku / total_qty) if total_qty > 0 else Decimal(0)
         expense_per_unit = (total_expenses_sku / total_qty) if total_qty > 0 else Decimal(0)
         net_per = avg_price - _to_decimal(p.cost_price) - expense_per_unit
         margin = (net_per / avg_price * 100) if avg_price > 0 else Decimal(0)
@@ -352,7 +370,7 @@ async def get_dashboard(
             }
 
         trend = [
-            int(daily_revenue.get((external_sku, shop_id), {}).get(day, Decimal(0)))
+            int(daily_actual_revenue.get((external_sku, shop_id), {}).get(day, Decimal(0)))
             for day in trend_dates
         ]
 
@@ -381,13 +399,16 @@ async def get_dashboard(
     for p in products.values():
         p_sales = [s for s in sales if s.external_sku == p.sku]
         p_revenue = sum(_to_decimal(s.revenue) for s in p_sales)
+        p_actual_revenue = sum(_customer_revenue(s) for s in p_sales)
         p_expenses = sum(_sale_expenses(s) for s in p_sales)
         p_ads = sum(_to_decimal(s.advertising) for s in p_sales)
         p_gross = p_revenue - p_expenses
-        p_cost = _to_decimal(p.cost_price) * sum(s.quantity or 0 for s in p_sales)
+        p_qty = sum(s.quantity or 0 for s in p_sales)
+        p_cost = _to_decimal(p.cost_price) * p_qty
         p_net = p_gross - p_cost
         p_margin = (p_net / p_revenue * 100) if p_revenue > 0 else Decimal(0)
         p_drr = (p_ads / p_revenue * 100) if p_revenue > 0 else Decimal(0)
+        p_avg_price = (p_actual_revenue / p_qty) if p_qty > 0 else Decimal(0)
 
         p_stocks = [st for st in stocks if st.external_sku == p.sku]
         total_stock = sum(st.quantity for st in p_stocks)
@@ -400,7 +421,7 @@ async def get_dashboard(
                 net_profit=p_net,
                 margin=p_margin,
                 drr=p_drr,
-                avg_price=Decimal(0),  # Will be calculated from actual prices
+                avg_price=p_avg_price,
                 min_price=p.min_price,
                 total_stock=total_stock,
                 alert_price=False,  # Will check against actual prices

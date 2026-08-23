@@ -258,6 +258,7 @@ class SyncService:
             external_id = item.get("external_id") or ""
             quantity = int(item.get("quantity", 1) or 1)
             price = Decimal(str(item.get("price", 0) or 0))
+            customer_price = Decimal(str(item.get("customer_price", price) or price))
             revenue = Decimal(str(item.get("revenue", price * quantity)))
             is_return = bool(item.get("is_return", False))
 
@@ -268,6 +269,7 @@ class SyncService:
                 external_id=external_id,
                 quantity=quantity,
                 price=price,
+                customer_price=customer_price,
                 revenue=revenue,
                 commission=Decimal(str(item.get("commission", 0) or 0)),
                 logistics=Decimal(str(item.get("logistics", 0) or 0)),
@@ -285,6 +287,7 @@ class SyncService:
                     "date": stmt.excluded.date,
                     "quantity": stmt.excluded.quantity,
                     "price": stmt.excluded.price,
+                    "customer_price": stmt.excluded.customer_price,
                     "revenue": stmt.excluded.revenue,
                     "commission": stmt.excluded.commission,
                     "logistics": stmt.excluded.logistics,
@@ -328,6 +331,7 @@ class SyncService:
                 "external_id": item.get("external_id"),
                 "quantity": item.get("quantity", 1),
                 "price": item["price"],
+                "customer_price": item.get("customer_price", item["price"]),
                 "revenue": item.get("revenue", item["price"] * item.get("quantity", 1)),
                 "commission": Decimal(str(item.get("commission", 0) or 0)),
                 "logistics": Decimal(str(item.get("logistics", 0) or 0)),
