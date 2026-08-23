@@ -41,10 +41,10 @@ class YandexMarketAdapter(MarketplaceAdapter):
 
     def __init__(self, shop_id: str, credentials: Dict[str, Any]):
         super().__init__(shop_id, credentials)
-        self.api_key = credentials.get("api_key", "")
-        self.oauth_token = credentials.get("oauth_token", "")
-        self.business_id = credentials.get("business_id", "")
-        self.campaign_id = credentials.get("campaign_id", "")
+        self.api_key = str(credentials.get("api_key", "")).strip()
+        self.oauth_token = str(credentials.get("oauth_token", "")).strip()
+        self.business_id = str(credentials.get("business_id", "")).strip()
+        self.campaign_id = str(credentials.get("campaign_id", "")).strip()
 
         # Build headers based on auth method
         if self.api_key:
@@ -134,14 +134,20 @@ class YandexMarketAdapter(MarketplaceAdapter):
                 )
                 quantity = int(product.get("count", 1) or 1)
 
+                # price = what the seller receives (marketplace price)
+                # customer_price = what the buyer actually paid (buyer price)
+                price_value = Decimal(str(marketplace_price or buyer_price or 0))
+                customer_price_value = Decimal(str(buyer_price or marketplace_price or 0))
+
                 sales.append({
                     "date": sale_date,
                     "external_sku": shop_sku,
                     "external_id": order_id,
                     "name": product.get("offerName") or product.get("name") or shop_sku,
                     "quantity": quantity,
-                    "price": Decimal(str(marketplace_price or buyer_price or 0)),
-                    "revenue": Decimal(str((buyer_price or marketplace_price or 0) * quantity)),
+                    "price": price_value,
+                    "customer_price": customer_price_value,
+                    "revenue": price_value * quantity,
                     "commission": Decimal("0"),
                     "logistics": Decimal("0"),
                     "storage": Decimal("0"),
