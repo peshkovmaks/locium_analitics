@@ -26,13 +26,6 @@ function formatPercent(v) {
   return n.toFixed(1) + '%';
 }
 
-function formatDate(v) {
-  if (!v) return '—';
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
 function formatDateTime(v) {
   if (!v) return '—';
   const d = new Date(v);
@@ -572,13 +565,11 @@ function BalancesSection({ items, loading, error }) {
   return (
     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 overflow-x-auto">
       <h3 className="font-semibold mb-4">Деньги на счету</h3>
-      <table className="w-full text-sm min-w-[600px]">
+      <table className="w-full text-sm min-w-[400px]">
         <thead className="text-gray-500 border-b">
           <tr>
             <th className="text-left py-2 font-normal">Маркетплейс</th>
-            <th className="text-left py-2 font-normal">Магазин</th>
             <th className="text-right py-2 font-normal">Баланс</th>
-            <th className="text-left py-2 font-normal">Ближайшая выплата</th>
             <th className="text-left py-2 font-normal">Время обновления</th>
           </tr>
         </thead>
@@ -594,11 +585,9 @@ function BalancesSection({ items, loading, error }) {
                     <span className="font-medium">{MP_NAMES[key] || item.marketplace}</span>
                   </div>
                 </td>
-                <td className="py-3">{item.shop_name}</td>
                 <td className="text-right tabular-nums font-medium">
                   {isSupported ? formatMoney(item.balance) : <span className="text-gray-400">не поддерживается</span>}
                 </td>
-                <td className="py-3">{item.payout_at ? formatDate(item.payout_at) : 'неизвестно'}</td>
                 <td className="py-3 text-gray-500">{formatDateTime(item.updated_at)}</td>
               </tr>
             );
