@@ -112,6 +112,17 @@ class ShopSyncResult(BaseModel):
     adverts: SyncSectionResult
     prices: SyncSectionResult
     finance: SyncSectionResult
+    balance: SyncSectionResult
+
+
+class BalanceOut(BaseModel):
+    shop_id: UUID
+    marketplace: Marketplace
+    shop_name: str
+    balance: Decimal
+    payout_at: Optional[datetime]
+    currency: str
+    updated_at: Optional[datetime]
 
 
 class SyncLogOut(BaseModel):
