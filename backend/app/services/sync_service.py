@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.adapters.base import AdapterFactory
 from app.adapters.wildberries import RateLimitExceeded
-from app.models import Shop, Sale, Stock, Advert, Product, ProductShopMapping, SyncLog
+from app.models import Shop, Sale, Stock, Advert, Product, ProductShopMapping, SyncLog, ShopBalance
 
 
 class SyncService:
@@ -49,6 +49,26 @@ class SyncService:
                 "message": "Authentication failed",
             }
 
+        # Sync current balance — isolated so a balance failure does not break the sync.
+        try:
+            balance_data = await adapter.get_balance()
+            if balance_data:
+                await self._upsert_balance(shop.id, balance_data)
+                results["balance"] = {
+                    "status": "success",
+                    "count": 1,
+                    "message": None,
+                }
+            else:
+                results["balance"] = {
+                    "status": "skipped",
+                    "count": 0,
+                    "message": "Balance not available for this marketplace",
+                }
+        except Exception as e:
+            logger.warning("Failed to sync balance for shop %s: %s", shop.id, e)
+            results["balance"] = {"status": "error", "count": 0, "message": str(e)}
+
         if date_from is None:
             date_from = (datetime.utcnow() - timedelta(days=days_back)).replace(
                 hour=0, minute=0, second=0, microsecond=0
@@ -65,6 +85,7 @@ class SyncService:
             "adverts": {"status": "success", "count": 0, "message": None},
             "prices": {"status": "success", "count": 0, "message": None},
             "finance": {"status": "success", "count": 0, "message": None},
+            "balance": {"status": "success", "count": 0, "message": None},
         }
 
         all_items = []
@@ -165,7 +186,7 @@ class SyncService:
                 status=results["status"],
                 sections={
                     k: v for k, v in results.items()
-                    if k in ("orders", "stocks", "adverts", "prices", "finance")
+                    if k in ("orders", "stocks", "adverts", "prices", "finance", "balance")
                 },
                 message=results.get("message"),
             )
@@ -176,6 +197,41 @@ class SyncService:
             await self.db.rollback()
 
         return results
+
+    async def _upsert_balance(
+        self,
+        shop_id: Any,
+        balance_data: Dict[str, Any],
+    ):
+        """Upsert ShopBalance record from adapter data."""
+        from sqlalchemy.dialects.postgresql import insert
+
+        payout_at = balance_data.get("payout_at")
+        if payout_at and isinstance(payout_at, str):
+            try:
+                payout_at = datetime.fromisoformat(payout_at.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                payout_at = None
+        elif payout_at and isinstance(payout_at, datetime):
+            payout_at = self._naive_dt(payout_at)
+
+        stmt = insert(ShopBalance).values(
+            shop_id=shop_id,
+            balance=Decimal(str(balance_data.get("balance", 0) or 0)),
+            payout_at=payout_at,
+            currency=balance_data.get("currency", "RUB") or "RUB",
+            updated_at=datetime.utcnow(),
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["shop_id"],
+            set_={
+                "balance": stmt.excluded.balance,
+                "payout_at": stmt.excluded.payout_at,
+                "currency": stmt.excluded.currency,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+        await self.db.execute(stmt)
 
     def _naive_dt(self, value: datetime) -> datetime:
         return value.replace(tzinfo=None) if value and value.tzinfo else value
