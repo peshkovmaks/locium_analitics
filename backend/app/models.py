@@ -218,6 +218,7 @@ class ShopBalance(Base):
     balance = Column(Numeric(14, 2), default=0, nullable=False)
     payout_at = Column(DateTime, nullable=True)
     currency = Column(String(10), default="RUB", nullable=False)
+    is_supported = Column(Boolean, default=True, nullable=False)
     updated_at = Column(
         DateTime,
         default=datetime.utcnow,

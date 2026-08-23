@@ -71,12 +71,20 @@ class SyncService:
         # Sync current balance — isolated so a balance failure does not break the sync.
         try:
             balance_data = await adapter.get_balance()
-            if balance_data:
+            if balance_data and balance_data.get("is_supported", True):
                 await self._upsert_balance(shop.id, balance_data)
                 results["balance"] = {
                     "status": "success",
                     "count": 1,
                     "message": None,
+                }
+            elif balance_data:
+                # Adapter explicitly says balance is not supported for this marketplace.
+                await self._upsert_balance(shop.id, balance_data)
+                results["balance"] = {
+                    "status": "skipped",
+                    "count": 0,
+                    "message": "Balance not available for this marketplace",
                 }
             else:
                 results["balance"] = {
@@ -215,11 +223,13 @@ class SyncService:
         elif payout_at and isinstance(payout_at, datetime):
             payout_at = self._naive_dt(payout_at)
 
+        is_supported = bool(balance_data.get("is_supported", True))
         stmt = insert(ShopBalance).values(
             shop_id=shop_id,
             balance=Decimal(str(balance_data.get("balance", 0) or 0)),
             payout_at=payout_at,
             currency=balance_data.get("currency", "RUB") or "RUB",
+            is_supported=is_supported,
             updated_at=datetime.utcnow(),
         )
         stmt = stmt.on_conflict_do_update(
@@ -228,6 +238,7 @@ class SyncService:
                 "balance": stmt.excluded.balance,
                 "payout_at": stmt.excluded.payout_at,
                 "currency": stmt.excluded.currency,
+                "is_supported": stmt.excluded.is_supported,
                 "updated_at": stmt.excluded.updated_at,
             },
         )

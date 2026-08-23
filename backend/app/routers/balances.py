@@ -33,11 +33,17 @@ async def list_balances(
 
     balances = []
     for shop, balance in rows:
+        if balance and balance.is_supported is False:
+            balance_value = "not_supported"
+        elif balance:
+            balance_value = balance.balance
+        else:
+            balance_value = Decimal("0")
         balances.append({
             "shop_id": shop.id,
             "marketplace": shop.marketplace,
             "shop_name": shop.name,
-            "balance": balance.balance if balance else Decimal("0"),
+            "balance": balance_value,
             "payout_at": balance.payout_at if balance else None,
             "currency": balance.currency if balance else "RUB",
             "updated_at": balance.updated_at if balance else None,

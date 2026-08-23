@@ -119,7 +119,7 @@ class BalanceOut(BaseModel):
     shop_id: UUID
     marketplace: Marketplace
     shop_name: str
-    balance: Decimal
+    balance: Decimal | str
     payout_at: Optional[datetime]
     currency: str
     updated_at: Optional[datetime]
