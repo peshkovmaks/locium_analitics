@@ -72,6 +72,25 @@ async def _async_send_daily_reports():
 
 
 @celery_app.task
+def send_morning_report_task():
+    """Send morning report at 9:00."""
+    asyncio.run(_async_send_morning_reports())
+
+
+async def _async_send_morning_reports():
+    async with _task_session() as db:
+        bot = TelegramBotService()
+        result = await db.execute(select(User))
+        users = result.scalars().all()
+
+        for user in users:
+            try:
+                await bot.send_morning_report(db, str(user.id))
+            except Exception as e:
+                print(f"Failed to send morning report to user {user.id}: {e}")
+
+
+@celery_app.task
 def check_alerts_task():
     """Check for price/stock/DDR alerts every hour."""
     asyncio.run(_async_check_alerts())
