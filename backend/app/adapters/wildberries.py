@@ -154,6 +154,34 @@ class WildberriesAdapter(MarketplaceAdapter):
             response.raise_for_status()
             return response.json()
 
+    async def _finance_get(
+        self, endpoint: str, params: Optional[Dict] = None
+    ) -> Any:
+        """GET against the WB Finance API with the shared finance throttle.
+
+        Finance endpoints share the same 1 request/min limit as POST finance
+        endpoints, so we reuse the global statistics throttle.
+        """
+        await self._throttle()
+        url = f"{self.BASE_URLS['finance']}{endpoint}"
+        async with self._http_client() as client:
+            response = await client.get(url, headers=self.headers, params=params, timeout=120.0)
+            self._touch()
+            if response.status_code == 429:
+                retry_after = response.headers.get("x-ratelimit-retry") or response.headers.get("Retry-After")
+                try:
+                    retry_seconds = float(retry_after) if retry_after else 60.0
+                except (ValueError, TypeError):
+                    retry_seconds = 60.0
+                if retry_seconds > 300:
+                    raise RateLimitExceeded(
+                        f"WB finance rate limit for {endpoint}: retry after {retry_seconds:.0f}s"
+                    )
+                await asyncio.sleep(retry_seconds)
+                response = await client.get(url, headers=self.headers, params=params, timeout=120.0)
+            response.raise_for_status()
+            return response.json()
+
     async def _analytics_get(self, endpoint: str, params: Optional[Dict] = None) -> Any:
         """GET against the Analytics API, without the statistics _throttle.
 
@@ -535,3 +563,24 @@ class WildberriesAdapter(MarketplaceAdapter):
                 "other": Decimal(str(self._finance_value(item, "deduction") or 0)) + Decimal(str(self._finance_value(item, "penalty") or 0)),
             })
         return reports
+
+    async def get_balance(self) -> Optional[Dict[str, Any]]:
+        """Get current seller balance and withdrawable amount.
+
+        Uses GET /api/v1/account/balance on finance-api.wildberries.ru.
+        Returns payout_at=None because WB API does not expose the next payout date.
+        """
+        try:
+            data = await self._finance_get("/api/v1/account/balance")
+            if not isinstance(data, dict):
+                logger.warning("WB balance response is not a dict for shop %s", self.shop_id)
+                return None
+            return {
+                "balance": Decimal(str(data.get("current", 0) or 0)),
+                "available": Decimal(str(data.get("for_withdraw", 0) or 0)),
+                "currency": data.get("currency", "RUB"),
+                "payout_at": None,
+            }
+        except Exception as e:
+            logger.warning("Failed to get WB balance for shop %s: %s", self.shop_id, e)
+            return None

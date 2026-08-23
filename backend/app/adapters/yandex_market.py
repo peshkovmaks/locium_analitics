@@ -273,6 +273,17 @@ class YandexMarketAdapter(MarketplaceAdapter):
             })
         return prices
 
+    async def get_balance(self) -> Optional[Dict[str, Any]]:
+        """Yandex Market Partner API does not expose current seller balance.
+
+        Payment reports are historical and async; there is no endpoint that
+        returns the current account balance or the next payout date.
+        """
+        logger.warning(
+            "Yandex Market does not expose current balance via API for shop %s", self.shop_id
+        )
+        return None
+
     async def get_finance_report(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         """Get finance report from Yandex Market.
 

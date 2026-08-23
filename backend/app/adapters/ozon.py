@@ -331,6 +331,34 @@ class OzonAdapter(MarketplaceAdapter):
                 return []
             raise
 
+    async def get_balance(self) -> Optional[Dict[str, Any]]:
+        """Get seller balance from Ozon Finance → Balance report.
+
+        Uses POST /v1/finance/balance. The API does not expose a dedicated
+        "available for withdrawal" amount, so we use the closing balance for the
+        current day as the best proxy. payout_at is not provided by Ozon API.
+        """
+        try:
+            today = datetime.utcnow().date()
+            data = await self._post_with_delay(
+                "/v1/finance/balance",
+                {
+                    "date_from": today.strftime("%Y-%m-%d"),
+                    "date_to": today.strftime("%Y-%m-%d"),
+                },
+            )
+            total = (data or {}).get("total", {})
+            closing = total.get("closing_balance", {}) or {}
+            return {
+                "balance": Decimal(str(closing.get("value", 0) or 0)),
+                "available": Decimal(str(closing.get("value", 0) or 0)),
+                "currency": closing.get("currency_code", "RUB"),
+                "payout_at": None,
+            }
+        except Exception as e:
+            logger.warning("Failed to get Ozon balance for shop %s: %s", self.shop_id, e)
+            return None
+
     async def get_finance_report(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         """Fetch transactions from Ozon and group expenses by posting number.
 
