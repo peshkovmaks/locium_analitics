@@ -152,16 +152,30 @@ async def get_dashboard(
             + _to_decimal(s.other)
         )
 
-    def _customer_revenue(s: Sale) -> Decimal:
-        """Revenue at the price actually paid by the customer."""
+    def _gross_revenue(s: Sale) -> Decimal:
+        """Gross order amount — the larger of seller price and buyer price."""
+        cp = _to_decimal(s.customer_price)
+        if cp > 0:
+            return max(_to_decimal(s.price), cp) * (s.quantity or 0)
+        return _to_decimal(s.revenue)
+
+    def _net_revenue(s: Sale) -> Decimal:
+        """Net revenue to the seller — the smaller of seller price and buyer price."""
+        cp = _to_decimal(s.customer_price)
+        if cp > 0:
+            return min(_to_decimal(s.price), cp) * (s.quantity or 0)
+        return _to_decimal(s.revenue)
+
+    def _buyer_revenue(s: Sale) -> Decimal:
+        """Revenue at the buyer-paid price, used for unit economics average price."""
         cp = _to_decimal(s.customer_price)
         if cp > 0:
             return cp * (s.quantity or 0)
         return _to_decimal(s.revenue)
 
     # Calculate KPIs
-    total_revenue = sum(_to_decimal(s.revenue) for s in sales) - sum(_to_decimal(r.revenue) for r in returns)
-    total_actual_revenue = sum(_customer_revenue(s) for s in sales) - sum(_customer_revenue(r) for r in returns)
+    total_revenue = sum(_gross_revenue(s) for s in sales) - sum(_gross_revenue(r) for r in returns)
+    total_actual_revenue = sum(_net_revenue(s) for s in sales) - sum(_net_revenue(r) for r in returns)
     total_expenses = sum(_sale_expenses(s) for s in sales)
     total_ads = sum(_to_decimal(s.advertising) for s in sales)
     total_gross = total_revenue - total_expenses
@@ -213,8 +227,8 @@ async def get_dashboard(
         day_returns = returns_by_day.get(day, [])
         day_adverts = adverts_by_day.get(day, [])
 
-        day_revenue = sum(_to_decimal(s.revenue) for s in day_sales) - sum(_to_decimal(r.revenue) for r in day_returns)
-        day_actual_revenue = sum(_customer_revenue(s) for s in day_sales) - sum(_customer_revenue(r) for r in day_returns)
+        day_revenue = sum(_gross_revenue(s) for s in day_sales) - sum(_gross_revenue(r) for r in day_returns)
+        day_actual_revenue = sum(_net_revenue(s) for s in day_sales) - sum(_net_revenue(r) for r in day_returns)
         day_expenses = sum(_sale_expenses(s) for s in day_sales)
         day_gross = day_revenue - day_expenses
         day_cost = sum(
@@ -240,8 +254,8 @@ async def get_dashboard(
         mp_returns = [r for r in returns if r.shop_id == shop.id]
         mp_adverts = [a for a in adverts if a.shop_id == shop.id]
 
-        mp_revenue = sum(_to_decimal(s.revenue) for s in mp_sales) - sum(_to_decimal(r.revenue) for r in mp_returns)
-        mp_actual_revenue = sum(_customer_revenue(s) for s in mp_sales) - sum(_customer_revenue(r) for r in mp_returns)
+        mp_revenue = sum(_gross_revenue(s) for s in mp_sales) - sum(_gross_revenue(r) for r in mp_returns)
+        mp_actual_revenue = sum(_net_revenue(s) for s in mp_sales) - sum(_net_revenue(r) for r in mp_returns)
         mp_expenses = sum(_sale_expenses(s) for s in mp_sales)
         mp_ads = sum(_to_decimal(s.advertising) for s in mp_sales)
         mp_gross = mp_revenue - mp_expenses
@@ -337,7 +351,7 @@ async def get_dashboard(
         daily_revenue.setdefault(key, {})
         daily_revenue[key][day] = daily_revenue[key].get(day, Decimal(0)) + _to_decimal(s.revenue)
         daily_actual_revenue.setdefault(key, {})
-        daily_actual_revenue[key][day] = daily_actual_revenue[key].get(day, Decimal(0)) + _customer_revenue(s)
+        daily_actual_revenue[key][day] = daily_actual_revenue[key].get(day, Decimal(0)) + _buyer_revenue(s)
 
     product_unit_map: Dict[str, dict] = {}
     for (external_sku, shop_id), s_sales in sku_sales.items():
@@ -351,7 +365,7 @@ async def get_dashboard(
 
         total_qty = sum(s.quantity or 0 for s in s_sales)
         total_revenue_sku = sum(_to_decimal(s.revenue) for s in s_sales)
-        total_actual_revenue_sku = sum(_customer_revenue(s) for s in s_sales)
+        total_actual_revenue_sku = sum(_buyer_revenue(s) for s in s_sales)
         total_expenses_sku = sum(_sale_expenses(s) for s in s_sales)
         total_ads_sku = sum(_to_decimal(s.advertising) for s in s_sales)
 
@@ -399,7 +413,7 @@ async def get_dashboard(
     for p in products.values():
         p_sales = [s for s in sales if s.external_sku == p.sku]
         p_revenue = sum(_to_decimal(s.revenue) for s in p_sales)
-        p_actual_revenue = sum(_customer_revenue(s) for s in p_sales)
+        p_actual_revenue = sum(_buyer_revenue(s) for s in p_sales)
         p_expenses = sum(_sale_expenses(s) for s in p_sales)
         p_ads = sum(_to_decimal(s.advertising) for s in p_sales)
         p_gross = p_revenue - p_expenses
