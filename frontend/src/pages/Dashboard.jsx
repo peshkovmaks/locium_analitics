@@ -574,8 +574,8 @@ function BalancesSection({ items, loading, error }) {
         <thead className="text-gray-500 border-b">
           <tr>
             <th className="text-left py-2 font-normal">Маркетплейс</th>
-            <th className="text-right py-2 font-normal">Баланс</th>
             <th className="text-left py-2 font-normal">Время обновления</th>
+            <th className="text-right py-2 font-normal">Баланс</th>
           </tr>
         </thead>
         <tbody>
@@ -590,10 +590,10 @@ function BalancesSection({ items, loading, error }) {
                     <span className="font-medium">{MP_NAMES[key] || item.marketplace}</span>
                   </div>
                 </td>
+                <td className="py-3 text-gray-500">{formatDateTime(item.updated_at)}</td>
                 <td className="text-right tabular-nums font-medium">
                   {isSupported ? formatMoney(item.balance) : <span className="text-gray-400">не поддерживается</span>}
                 </td>
-                <td className="py-3 text-gray-500">{formatDateTime(item.updated_at)}</td>
               </tr>
             );
           })}
@@ -601,8 +601,8 @@ function BalancesSection({ items, loading, error }) {
         <tfoot className="border-t-2 border-gray-100">
           <tr>
             <td className="py-3 font-semibold text-gray-900">Итого денег на счетах</td>
-            <td className="text-right tabular-nums font-bold text-gray-900">{formatMoney(totalBalance)}</td>
             <td />
+            <td className="text-right tabular-nums font-bold text-gray-900">{formatMoney(totalBalance)}</td>
           </tr>
         </tfoot>
       </table>
