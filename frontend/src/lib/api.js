@@ -71,3 +71,7 @@ export const shops = {
     }),
   syncLogs: (shopId, limit = 1) => api(`/shops/${shopId}/sync-logs?limit=${limit}`),
 };
+
+export const balances = {
+  list: () => api('/balances/'),
+};

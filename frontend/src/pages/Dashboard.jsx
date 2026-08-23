@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { dashboard } from '../lib/api';
+import { dashboard, balances } from '../lib/api';
 
 const MP_NAMES = { wb: 'Wildberries', ozon: 'Ozon', ym: 'Яндекс Маркет' };
 const MP_KEYS = { wb: 'wb', ozon: 'ozon', ym: 'ym' };
@@ -24,6 +24,20 @@ function formatPercent(v) {
   if (v === undefined || v === null) return '—';
   const n = typeof v === 'string' ? parseFloat(v) : Number(v);
   return n.toFixed(1) + '%';
+}
+
+function formatDate(v) {
+  if (!v) return '—';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatDateTime(v) {
+  if (!v) return '—';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function classNames(...args) {
@@ -527,6 +541,74 @@ function ProductsTable({ rows }) {
   );
 }
 
+function BalancesSection({ items, loading, error }) {
+  if (loading) {
+    return (
+      <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+        <h3 className="font-semibold mb-4">Деньги на счету</h3>
+        <div className="text-center py-8 text-gray-500">Загрузка балансов...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+        <h3 className="font-semibold mb-4">Деньги на счету</h3>
+        <div className="text-center py-8 text-red-600">Ошибка загрузки балансов: {error}</div>
+      </div>
+    );
+  }
+
+  if (!items || items.length === 0) {
+    return (
+      <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+        <h3 className="font-semibold mb-4">Деньги на счету</h3>
+        <div className="text-center py-8 text-gray-400">Нет данных о балансах</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 overflow-x-auto">
+      <h3 className="font-semibold mb-4">Деньги на счету</h3>
+      <table className="w-full text-sm min-w-[600px]">
+        <thead className="text-gray-500 border-b">
+          <tr>
+            <th className="text-left py-2 font-normal">Маркетплейс</th>
+            <th className="text-left py-2 font-normal">Магазин</th>
+            <th className="text-right py-2 font-normal">Баланс</th>
+            <th className="text-left py-2 font-normal">Ближайшая выплата</th>
+            <th className="text-left py-2 font-normal">Время обновления</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => {
+            const key = item.marketplace;
+            const isSupported = item.balance !== null && item.balance !== undefined && item.balance !== 'not_supported';
+            return (
+              <tr key={item.shop_id} className="border-b">
+                <td className="py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full" style={{ background: MP_COLORS[key] || '#9ca3af' }} />
+                    <span className="font-medium">{MP_NAMES[key] || item.marketplace}</span>
+                  </div>
+                </td>
+                <td className="py-3">{item.shop_name}</td>
+                <td className="text-right tabular-nums font-medium">
+                  {isSupported ? formatMoney(item.balance) : <span className="text-gray-400">не поддерживается</span>}
+                </td>
+                <td className="py-3">{item.payout_at ? formatDate(item.payout_at) : 'неизвестно'}</td>
+                <td className="py-3 text-gray-500">{formatDateTime(item.updated_at)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [period, setPeriod] = useState('today');
   const [marketplace, setMarketplace] = useState('all');
@@ -536,6 +618,20 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const [balanceItems, setBalanceItems] = useState([]);
+  const [balancesLoading, setBalancesLoading] = useState(true);
+  const [balancesError, setBalancesError] = useState('');
+
+  useEffect(() => {
+    setBalancesLoading(true);
+    setBalancesError('');
+    balances
+      .list()
+      .then(setBalanceItems)
+      .catch((e) => setBalancesError(e.message))
+      .finally(() => setBalancesLoading(false));
+  }, []);
 
   const loadData = () => {
     setLoading(true);
@@ -734,6 +830,9 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Balances */}
+      <BalancesSection items={balanceItems} loading={balancesLoading} error={balancesError} />
 
       {/* Charts row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
