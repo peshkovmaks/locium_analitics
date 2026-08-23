@@ -142,14 +142,14 @@ async def get_dashboard(
 
     def _sale_expenses(s: Sale) -> Decimal:
         return (
-            _to_decimal(s.commission)
-            + _to_decimal(s.logistics)
-            + _to_decimal(s.storage)
-            + _to_decimal(s.advertising)
-            + _to_decimal(s.returns)
-            + _to_decimal(s.insurance)
-            + _to_decimal(s.acquiring)
-            + _to_decimal(s.other)
+            max(_to_decimal(s.commission), Decimal(0))
+            + max(_to_decimal(s.logistics), Decimal(0))
+            + max(_to_decimal(s.storage), Decimal(0))
+            + max(_to_decimal(s.advertising), Decimal(0))
+            + max(_to_decimal(s.returns), Decimal(0))
+            + max(_to_decimal(s.insurance), Decimal(0))
+            + max(_to_decimal(s.acquiring), Decimal(0))
+            + max(_to_decimal(s.other), Decimal(0))
         )
 
     def _gross_revenue(s: Sale) -> Decimal:

@@ -197,7 +197,7 @@ class OzonAdapter(MarketplaceAdapter):
                 for key in keys:
                     val = src.get(key)
                     if val is not None:
-                        return Decimal(str(val))
+                        return max(Decimal(str(val)), Decimal(0))
             return Decimal(0)
 
         return {
