@@ -65,30 +65,19 @@ class YandexMarketAdapter(MarketplaceAdapter):
             raise ValueError("Either api_key or oauth_token must be provided in credentials")
 
     async def authenticate(self) -> bool:
-        """Check credentials by getting campaigns list.
+        """Check credentials by calling a lightweight orders stats endpoint.
 
-        Also auto-detects business_id from campaigns if not provided.
+        GET /v2/campaigns is not always available with Api-Key auth; the stats
+        endpoint we actually use is a more reliable check.
         """
-        try:
-            data = await self._get("/v2/campaigns", params={"limit": 10})
-            if isinstance(data, list) and len(data) > 0:
-                # Auto-detect business_id if not set
-                if not self.business_id:
-                    first_business = data[0].get("business", {})
-                    bid = first_business.get("id")
-                    if bid:
-                        self.business_id = str(bid)
-                        logger.info(f"Auto-detected YM Business ID: {self.business_id}")
-                return True
-            if isinstance(data, dict) and data.get("campaigns"):
-                if not self.business_id:
-                    first_business = data["campaigns"][0].get("business", {})
-                    bid = first_business.get("id")
-                    if bid:
-                        self.business_id = str(bid)
-                        logger.info(f"Auto-detected YM Business ID: {self.business_id}")
-                return True
+        if not self.campaign_id:
             return False
+        try:
+            await self._post(
+                f"/v2/campaigns/{self.campaign_id}/stats/orders",
+                {"dateFrom": "2026-01-01", "dateTo": "2026-01-01", "limit": 1},
+            )
+            return True
         except Exception:
             return False
 
