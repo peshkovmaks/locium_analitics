@@ -562,6 +562,11 @@ function BalancesSection({ items, loading, error }) {
     );
   }
 
+  const totalBalance = items.reduce((sum, item) => {
+    const isSupported = item.balance !== null && item.balance !== undefined && item.balance !== 'not_supported';
+    return isSupported ? sum + Number(item.balance) : sum;
+  }, 0);
+
   return (
     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 overflow-x-auto">
       <h3 className="font-semibold mb-4">Деньги на счету</h3>
@@ -593,6 +598,13 @@ function BalancesSection({ items, loading, error }) {
             );
           })}
         </tbody>
+        <tfoot className="border-t-2 border-gray-100">
+          <tr>
+            <td className="py-3 font-semibold text-gray-900">Итого денег на счетах</td>
+            <td className="text-right tabular-nums font-bold text-gray-900">{formatMoney(totalBalance)}</td>
+            <td />
+          </tr>
+        </tfoot>
       </table>
     </div>
   );
