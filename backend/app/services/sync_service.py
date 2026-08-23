@@ -551,7 +551,8 @@ class SyncService:
             )
         )
 
-        unallocated_advertising = Decimal("0")
+        EXPENSE_KEYS = ["commission", "logistics", "storage", "advertising", "returns", "insurance", "acquiring", "other"]
+        unallocated: Dict[str, Decimal] = {k: Decimal("0") for k in EXPENSE_KEYS}
 
         for item in finance:
             posting_number = item.get("external_id") or item.get("posting_number")
@@ -582,10 +583,12 @@ class SyncService:
                 continue
 
             if not sales:
-                # Advertising is sometimes reported under an ID that does not match
-                # any sale (e.g. Ozon campaign/posting shorthand). Keep it aside and
-                # distribute across all sales by revenue.
-                unallocated_advertising += Decimal(str(item.get("advertising", 0) or 0))
+                # Finance reports sometimes contain IDs that do not match any sale
+                # (different date cutoffs, corrections, posting shorthands, etc.).
+                # Keep all unmatched expenses aside and distribute them across all
+                # sales so nothing is lost.
+                for key in EXPENSE_KEYS:
+                    unallocated[key] += Decimal(str(item.get(key, 0) or 0))
                 continue
 
             total_revenue = sum((sale.revenue or Decimal(0)) for sale in sales)
@@ -609,8 +612,10 @@ class SyncService:
                 sale.acquiring += Decimal(str(item.get("acquiring", 0) or 0)) * weight
                 sale.other += Decimal(str(item.get("other", 0) or 0)) * weight
 
-        # Distribute advertising that could not be matched to specific sales.
-        if unallocated_advertising > 0:
+        # Distribute any expenses that could not be matched to specific sales.
+        for key, total in unallocated.items():
+            if total == 0:
+                continue
             result = await self.db.execute(
                 select(Sale).where(
                     Sale.shop_id == shop_id,
@@ -623,12 +628,14 @@ class SyncService:
             if total_revenue > 0:
                 for sale in all_sales:
                     weight = (sale.revenue or Decimal(0)) / total_revenue
-                    sale.advertising += unallocated_advertising * weight
+                    current = Decimal(getattr(sale, key))
+                    setattr(sale, key, current + total * weight)
             elif all_sales:
                 # No revenue but rows exist; split evenly to avoid losing the expense.
-                per_sale = unallocated_advertising / len(all_sales)
+                per_sale = total / len(all_sales)
                 for sale in all_sales:
-                    sale.advertising += per_sale
+                    current = Decimal(getattr(sale, key))
+                    setattr(sale, key, current + per_sale)
 
     async def initial_sync(
         self,

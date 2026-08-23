@@ -12,7 +12,7 @@ from app.services.sync_service import SyncService
 from app.utils.encryption import decrypt_dict
 
 
-async def main(days_back: int = 30):
+async def main(days_back: int = 30, date_from: datetime | None = None, date_to: datetime | None = None):
     session_maker = get_async_session_maker()
     async with session_maker() as db:
         shop = (
@@ -25,12 +25,21 @@ async def main(days_back: int = 30):
 
         credentials = decrypt_dict(dict(shop.credentials or {}))
         service = SyncService(db)
-        print(f"Starting Ozon sync for the past {days_back} days...")
-        result = await service.sync_shop(
-            shop,
-            days_back=days_back,
-            credentials=credentials,
-        )
+        if date_from and date_to:
+            print(f"Starting Ozon sync from {date_from.date()} to {date_to.date()}...")
+            result = await service.sync_shop(
+                shop,
+                credentials=credentials,
+                date_from=date_from,
+                date_to=date_to,
+            )
+        else:
+            print(f"Starting Ozon sync for the past {days_back} days...")
+            result = await service.sync_shop(
+                shop,
+                days_back=days_back,
+                credentials=credentials,
+            )
         print(result)
 
 
