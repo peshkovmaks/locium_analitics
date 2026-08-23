@@ -49,6 +49,25 @@ class SyncService:
                 "message": "Authentication failed",
             }
 
+        if date_from is None:
+            date_from = (datetime.utcnow() - timedelta(days=days_back)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+        if date_to is None:
+            date_to = datetime.utcnow()
+
+        results = {
+            "shop_id": str(shop.id),
+            "marketplace": shop.marketplace.value,
+            "status": "success",
+            "orders": {"status": "success", "count": 0, "message": None},
+            "stocks": {"status": "success", "count": 0, "message": None},
+            "adverts": {"status": "success", "count": 0, "message": None},
+            "prices": {"status": "success", "count": 0, "message": None},
+            "finance": {"status": "success", "count": 0, "message": None},
+            "balance": {"status": "success", "count": 0, "message": None},
+        }
+
         # Sync current balance — isolated so a balance failure does not break the sync.
         try:
             balance_data = await adapter.get_balance()
@@ -68,25 +87,6 @@ class SyncService:
         except Exception as e:
             logger.warning("Failed to sync balance for shop %s: %s", shop.id, e)
             results["balance"] = {"status": "error", "count": 0, "message": str(e)}
-
-        if date_from is None:
-            date_from = (datetime.utcnow() - timedelta(days=days_back)).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
-        if date_to is None:
-            date_to = datetime.utcnow()
-
-        results = {
-            "shop_id": str(shop.id),
-            "marketplace": shop.marketplace.value,
-            "status": "success",
-            "orders": {"status": "success", "count": 0, "message": None},
-            "stocks": {"status": "success", "count": 0, "message": None},
-            "adverts": {"status": "success", "count": 0, "message": None},
-            "prices": {"status": "success", "count": 0, "message": None},
-            "finance": {"status": "success", "count": 0, "message": None},
-            "balance": {"status": "success", "count": 0, "message": None},
-        }
 
         all_items = []
 
