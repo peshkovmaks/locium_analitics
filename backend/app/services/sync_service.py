@@ -1,7 +1,7 @@
 """Sync service — fetches data from marketplace APIs and saves to DB."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 logger = logging.getLogger(__name__)
 from typing import List, Dict, Any
@@ -105,6 +105,7 @@ class SyncService:
                 await self._clear_adverts(shop.id, date_from, date_to)
                 adverts = await adapter.get_adverts(date_from, date_to)
                 await self._save_adverts(shop.id, adverts)
+                await self._distribute_advert_spend(shop.id, adverts, date_from, date_to)
                 results["adverts"] = {"status": "success", "count": len(adverts), "message": None}
             except RateLimitExceeded as e:
                 results["adverts"] = {"status": "rate_limited", "count": 0, "message": str(e)}
@@ -302,6 +303,78 @@ class SyncService:
                 cr=item.get("cr", Decimal(0)),
             )
             self.db.add(advert)
+
+    async def _distribute_advert_spend(
+        self, shop_id, adverts: List[Dict[str, Any]], date_from: datetime, date_to: datetime
+    ):
+        """Distribute advert spend onto matching Sale.advertising for DRR.
+
+        WB advert stats arrive per nmId/advertId per day. We try to match by
+        external_sku first, then fall back to all sales of the day weighted by
+        revenue. This mirrors the unallocated-advertising logic in
+        _update_finance_data so the dashboard DRR reflects actual ad costs.
+        """
+        if not adverts:
+            return
+
+        from collections import defaultdict
+
+        # Aggregate spend per day.
+        spend_by_day: Dict[date, Decimal] = defaultdict(Decimal)
+        spend_by_sku_day: Dict[Tuple[str, date], Decimal] = defaultdict(Decimal)
+        for item in adverts:
+            day = self._naive_dt(item["date"]).date()
+            spend = Decimal(str(item.get("spend", 0) or 0))
+            spend_by_day[day] += spend
+            spend_by_sku_day[(str(item.get("external_sku", "")), day)] += spend
+
+        # Reset advertising for the period before redistributing.
+        await self.db.execute(
+            update(Sale)
+            .where(
+                Sale.shop_id == shop_id,
+                Sale.date >= date_from,
+                Sale.date <= date_to,
+            )
+            .values(advertising=Decimal("0"))
+        )
+
+        for day, total_spend in spend_by_day.items():
+            start_dt = datetime.combine(day, datetime.min.time())
+            end_dt = datetime.combine(day, datetime.max.time())
+            result = await self.db.execute(
+                select(Sale).where(
+                    Sale.shop_id == shop_id,
+                    Sale.date >= start_dt,
+                    Sale.date <= end_dt,
+                )
+            )
+            sales = result.scalars().all()
+            if not sales:
+                continue
+
+            # Try to allocate by external_sku first.
+            matched_sku_spend = Decimal("0")
+            for sale in sales:
+                sku_spend = spend_by_sku_day.get((sale.external_sku, day), Decimal("0"))
+                if sku_spend > 0:
+                    sale.advertising += sku_spend
+                    matched_sku_spend += sku_spend
+
+            unallocated = total_spend - matched_sku_spend
+            if unallocated <= 0:
+                continue
+
+            # Distribute remainder proportionally by revenue.
+            total_revenue = sum((sale.revenue or Decimal(0)) for sale in sales)
+            if total_revenue > 0:
+                for sale in sales:
+                    weight = (sale.revenue or Decimal(0)) / total_revenue
+                    sale.advertising += unallocated * weight
+            else:
+                per_sale = unallocated / len(sales)
+                for sale in sales:
+                    sale.advertising += per_sale
 
     async def _ensure_products(self, shop: Shop, items, names: Dict[str, str] | None = None):
         """Create Product records for new SKUs with shop mappings.

@@ -166,6 +166,19 @@ class WildberriesAdapter(MarketplaceAdapter):
             response.raise_for_status()
             return response.json()
 
+    async def _advert_get(self, endpoint: str, params: Optional[Dict] = None) -> Any:
+        """GET against the Advert API without the statistics _throttle.
+
+        Advert endpoints have their own rate limits (≈3/min); calling them
+        behind the 70s statistics throttle would slow the sync down for no
+        benefit. Keep a small guard to avoid bursts.
+        """
+        url = f"{self.BASE_URLS['advert']}{endpoint}"
+        async with self._http_client() as client:
+            response = await client.get(url, headers=self.headers, params=params, timeout=60.0)
+            response.raise_for_status()
+            return response.json()
+
     async def _fetch_statistics(
         self, endpoint: str, date_from: datetime, date_to: datetime
     ) -> List[Dict[str, Any]]:
@@ -254,18 +267,137 @@ class WildberriesAdapter(MarketplaceAdapter):
         logger.warning("WB stocks skipped for shop %s: not required", self.shop_id)
         return []
 
-    async def get_adverts(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
-        """Advertising stats are temporarily disabled for WB.
+    async def _get_advert_campaigns(self) -> List[Dict[str, Any]]:
+        """Fetch active WB advert campaigns.
 
-        WB advert API requires a separate token and endpoint path that differs
-        from the statistics token currently stored in credentials. Skipping to
-        keep the overall sync healthy.
+        Uses /adv/v1/promotion/count which lists campaigns grouped by status.
         """
-        logger.warning(
-            "WB adverts skipped for shop %s: advert API token/endpoint not available",
-            self.shop_id,
-        )
-        return []
+        try:
+            data = await self._advert_get("/adv/v1/promotion/count")
+        except Exception as e:
+            logger.warning("WB advert campaign list failed for shop %s: %s", self.shop_id, e)
+            return []
+
+        campaigns = []
+        for group in data.get("adverts", []) if isinstance(data, dict) else []:
+            for advert in group.get("advert_list", []) or []:
+                advert_id = advert.get("advertId")
+                if advert_id:
+                    campaigns.append({
+                        "advert_id": int(advert_id),
+                        "status": group.get("status"),
+                        "type": group.get("type"),
+                    })
+        return campaigns
+
+    async def _get_advert_stats(
+        self, campaign_ids: List[int], date_from: datetime, date_to: datetime
+    ) -> List[Dict[str, Any]]:
+        """Fetch WB advert full stats for the given campaign ids.
+
+        GET /adv/v3/fullstats accepts ids as a comma-separated query parameter.
+        Rate limit: 3 req/min; we call once with all ids.
+        """
+        if not campaign_ids:
+            return []
+
+        params = {
+            "ids": ",".join(str(i) for i in campaign_ids),
+            "beginDate": date_from.strftime("%Y-%m-%d"),
+            "endDate": date_to.strftime("%Y-%m-%d"),
+        }
+        try:
+            data = await self._advert_get("/adv/v3/fullstats", params=params)
+        except Exception as e:
+            logger.warning("WB advert stats failed for shop %s: %s", self.shop_id, e)
+            return []
+
+        rows = data if isinstance(data, list) else []
+        return rows
+
+    async def get_adverts(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
+        """Fetch WB advertising stats via Advert API v3/fullstats.
+
+        Campaigns are listed via /adv/v1/promotion/count and then stats are
+        fetched in bulk. Spend is rolled up by day; nmId is used as
+        external_sku when available so it can be matched to sales later.
+        """
+        campaigns = await self._get_advert_campaigns()
+        if not campaigns:
+            logger.info("WB shop %s has no advert campaigns", self.shop_id)
+            return []
+
+        campaign_ids = [c["advert_id"] for c in campaigns]
+        stats = await self._get_advert_stats(campaign_ids, date_from, date_to)
+        if not stats:
+            return []
+
+        adverts = []
+        for campaign in stats:
+            advert_id = campaign.get("advertId")
+            if not advert_id:
+                continue
+            for day in campaign.get("days", []) or []:
+                day_dt = None
+                try:
+                    day_dt = datetime.strptime(str(day.get("date", "")).split("T")[0], "%Y-%m-%d")
+                except (ValueError, TypeError):
+                    day_dt = date_from
+
+                # Top-level daily aggregates (sum across all apps).
+                spend = Decimal(str(day.get("sum", 0) or 0))
+                views = int(day.get("views", 0) or 0)
+                clicks = int(day.get("clicks", 0) or 0)
+                orders = int(day.get("orders", 0) or 0)
+                ctr = Decimal(str(day.get("ctr", 0) or 0))
+                cpc = Decimal(str(day.get("cpc", 0) or 0))
+                cr = Decimal(str(day.get("cr", 0) or 0))
+
+                # Roll up spend per nmId so external_sku is meaningful.
+                nm_spend: Dict[int, Decimal] = {}
+                nm_views: Dict[int, int] = {}
+                nm_clicks: Dict[int, int] = {}
+                nm_orders: Dict[int, int] = {}
+                for app in day.get("apps", []) or []:
+                    for nm in app.get("nms", []) or []:
+                        nm_id = nm.get("nmId")
+                        if nm_id is None:
+                            continue
+                        nm_spend[nm_id] = nm_spend.get(nm_id, Decimal("0")) + Decimal(str(nm.get("sum", 0) or 0))
+                        nm_views[nm_id] = nm_views.get(nm_id, 0) + int(nm.get("views", 0) or 0)
+                        nm_clicks[nm_id] = nm_clicks.get(nm_id, 0) + int(nm.get("clicks", 0) or 0)
+                        nm_orders[nm_id] = nm_orders.get(nm_id, 0) + int(nm.get("orders", 0) or 0)
+
+                if nm_spend:
+                    for nm_id, nm_total in nm_spend.items():
+                        adverts.append({
+                            "date": day_dt,
+                            "campaign_id": str(advert_id),
+                            "external_sku": str(nm_id),
+                            "views": nm_views.get(nm_id, 0),
+                            "clicks": nm_clicks.get(nm_id, 0),
+                            "ctr": ctr if ctr else Decimal("0"),
+                            "cpc": cpc if cpc else Decimal("0"),
+                            "spend": nm_total,
+                            "orders": nm_orders.get(nm_id, 0),
+                            "cr": cr if cr else Decimal("0"),
+                        })
+                else:
+                    # Campaign-level row when no nm breakdown is available.
+                    adverts.append({
+                        "date": day_dt,
+                        "campaign_id": str(advert_id),
+                        "external_sku": str(advert_id),
+                        "views": views,
+                        "clicks": clicks,
+                        "ctr": ctr if ctr else Decimal("0"),
+                        "cpc": cpc if cpc else Decimal("0"),
+                        "spend": spend,
+                        "orders": orders,
+                        "cr": cr if cr else Decimal("0"),
+                    })
+
+        return adverts
 
     async def get_prices(self) -> List[Dict[str, Any]]:
         """Current prices are temporarily disabled for WB.
@@ -278,6 +410,47 @@ class WildberriesAdapter(MarketplaceAdapter):
             self.shop_id,
         )
         return []
+
+    def _normalize_wb_srid(self, srid: Any) -> str:
+        """Normalize WB order id so finance report rows can match sales rows.
+
+        The statistics API returns srids like "ej.<hex>.0.0". The finance API
+        returns the bare hex part (or the same value). Keep only the last
+        dot-separated segment when it looks like a position suffix, and strip
+        any leading prefix ending with a dot.
+        """
+        if not srid:
+            return ""
+        value = str(srid).strip()
+        # Strip trailing .X.Y position suffixes.
+        while True:
+            parts = value.rsplit(".", 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                value = parts[0]
+            else:
+                break
+        # If the remaining value has a prefix ending with a dot before a hex
+        # looking segment, keep the hex segment. Examples:
+        #   ej.i417f68ba86af0fd75a9e865c8622d699 -> i417f68ba86af0fd75a9e865c8622d699
+        parts = value.split(".")
+        if len(parts) > 1:
+            return parts[-1]
+        return value
+
+    def _finance_value(self, item: Dict[str, Any], *keys: str) -> Any:
+        """Get a finance report value trying camelCase and snake_case keys."""
+        for key in keys:
+            val = item.get(key)
+            if val is not None and val != "":
+                return val
+            # Fallback to snake_case equivalent.
+            snake_key = "".join(
+                [c if c.islower() else "_" + c.lower() for c in key]
+            ).lstrip("_")
+            val = item.get(snake_key)
+            if val is not None and val != "":
+                return val
+        return None
 
     async def get_finance_report(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         """Get detailed finance report from the new WB Finance API.
@@ -311,37 +484,54 @@ class WildberriesAdapter(MarketplaceAdapter):
             if len(rows) < 100000:
                 break
 
+        if all_rows:
+            # Log a sample for diagnostics — WB finance field names change often.
+            sample = all_rows[0]
+            logger.info(
+                "WB finance report sample for shop %s: keys=%s external_id=%s external_sku=%s",
+                self.shop_id,
+                sorted(sample.keys()),
+                self._normalize_wb_srid(sample.get("srid")),
+                sample.get("vendorCode") or sample.get("sa_name") or "",
+            )
+
         reports = []
         for item in all_rows:
-            doc_type = (item.get("docTypeName") or "").lower()
+            doc_type = (self._finance_value(item, "docTypeName") or "").lower()
             is_return = "возврат" in doc_type or "return" in doc_type
-            quantity = item.get("quantity", 0) or 0
+            quantity = self._finance_value(item, "quantity") or 0
             if is_return and quantity > 0:
                 quantity = -quantity
 
-            revenue = Decimal(str(item.get("retailAmount", 0) or 0))
+            revenue = Decimal(str(self._finance_value(item, "retailAmount") or 0))
             if is_return:
                 revenue = -abs(revenue)
 
             # Acquisition / processing fee maps to acquiring.
-            acquiring = Decimal(str(item.get("acquiringFee", 0) or 0))
-            # If acquiringFee is empty, try legacy acquiring field names.
+            acquiring = Decimal(str(self._finance_value(item, "acquiringFee") or 0))
             if acquiring == 0:
-                acquiring = Decimal(str(item.get("acquiring_amount", 0) or 0))
+                acquiring = Decimal(str(self._finance_value(item, "acquiring_amount") or 0))
+
+            external_sku = str(
+                self._finance_value(item, "vendorCode")
+                or self._finance_value(item, "sa_name")
+                or ""
+            )
+            external_id = self._normalize_wb_srid(self._finance_value(item, "srid"))
 
             reports.append({
-                "date": datetime.strptime(item.get("rrDate", ""), "%Y-%m-%d") if item.get("rrDate") else date_from,
-                "external_sku": str(item.get("vendorCode", "") or item.get("sa_name", "") or ""),
-                "external_id": str(item.get("srid", "") or ""),
+                "date": datetime.strptime(self._finance_value(item, "rrDate"), "%Y-%m-%d") if self._finance_value(item, "rrDate") else date_from,
+                "external_sku": external_sku,
+                "external_id": external_id,
                 "quantity": quantity,
-                "price": Decimal(str(item.get("retailPrice", 0) or 0)),
+                "price": Decimal(str(self._finance_value(item, "retailPrice") or 0)),
                 "revenue": revenue,
-                "commission": Decimal(str(item.get("ppvzSalesCommission", 0) or 0)),
-                "logistics": Decimal(str(item.get("deliveryService", 0) or 0)),
-                "storage": Decimal(str(item.get("paidStorage", 0) or 0)),
-                "returns": Decimal(str(item.get("returnAmount", 0) or 0)),
+                "commission": Decimal(str(self._finance_value(item, "ppvzSalesCommission") or 0)),
+                "logistics": Decimal(str(self._finance_value(item, "deliveryService") or 0)),
+                "storage": Decimal(str(self._finance_value(item, "paidStorage") or 0)),
+                "returns": Decimal(str(self._finance_value(item, "returnAmount") or 0)),
                 "insurance": Decimal("0"),
                 "acquiring": acquiring,
-                "other": Decimal(str(item.get("deduction", 0) or 0)) + Decimal(str(item.get("penalty", 0) or 0)),
+                "other": Decimal(str(self._finance_value(item, "deduction") or 0)) + Decimal(str(self._finance_value(item, "penalty") or 0)),
             })
         return reports
