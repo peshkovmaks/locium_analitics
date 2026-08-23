@@ -72,6 +72,9 @@ class Shop(Base):
     sync_logs = relationship(
         "SyncLog", back_populates="shop", cascade="all, delete-orphan", order_by="desc(SyncLog.created_at)"
     )
+    balance = relationship(
+        "ShopBalance", back_populates="shop", uselist=False, cascade="all, delete-orphan"
+    )
 
 
 class SyncLog(Base):
@@ -200,6 +203,33 @@ class Advert(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     shop = relationship("Shop", back_populates="adverts")
+
+
+class ShopBalance(Base):
+    __tablename__ = "shop_balances"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shop_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("shops.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    balance = Column(Numeric(14, 2), default=0, nullable=False)
+    payout_at = Column(DateTime, nullable=True)
+    currency = Column(String(10), default="RUB", nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("shop_id", name="uix_shop_balance_shop_id"),
+    )
+
+    shop = relationship("Shop", back_populates="balance")
 
 
 class ProductShopMapping(Base):
