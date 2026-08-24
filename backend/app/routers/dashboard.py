@@ -178,7 +178,7 @@ async def get_dashboard(
     total_actual_revenue = sum(_net_revenue(s) for s in sales) - sum(_net_revenue(r) for r in returns)
     total_expenses = sum(_sale_expenses(s) for s in sales)
     total_ads = sum(_to_decimal(s.advertising) for s in sales)
-    total_gross = total_revenue - total_expenses
+    total_gross = total_actual_revenue - total_expenses
 
     # Calculate cost
     total_cost = Decimal(0)
@@ -230,7 +230,7 @@ async def get_dashboard(
         day_revenue = sum(_gross_revenue(s) for s in day_sales) - sum(_gross_revenue(r) for r in day_returns)
         day_actual_revenue = sum(_net_revenue(s) for s in day_sales) - sum(_net_revenue(r) for r in day_returns)
         day_expenses = sum(_sale_expenses(s) for s in day_sales)
-        day_gross = day_revenue - day_expenses
+        day_gross = day_actual_revenue - day_expenses
         day_cost = sum(
             _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
             for s in day_sales
@@ -258,7 +258,7 @@ async def get_dashboard(
         mp_actual_revenue = sum(_net_revenue(s) for s in mp_sales) - sum(_net_revenue(r) for r in mp_returns)
         mp_expenses = sum(_sale_expenses(s) for s in mp_sales)
         mp_ads = sum(_to_decimal(s.advertising) for s in mp_sales)
-        mp_gross = mp_revenue - mp_expenses
+        mp_gross = mp_actual_revenue - mp_expenses
         mp_cost = sum(
             _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
             for s in mp_sales
@@ -310,16 +310,19 @@ async def get_dashboard(
     mp_comparison: List[MarketplaceComparison] = []
     for shop in shops:
         mp = shop.marketplace.value
-        rev = sum(_to_decimal(s.revenue) for s in sales if s.shop_id == shop.id)
-        exp = sum(_sale_expenses(s) for s in sales if s.shop_id == shop.id)
-        gross = rev - exp
+        mp_sales_shop = [s for s in sales if s.shop_id == shop.id]
+        mp_returns_shop = [r for r in returns if r.shop_id == shop.id]
+        rev = sum(_gross_revenue(s) for s in mp_sales_shop) - sum(_gross_revenue(r) for r in mp_returns_shop)
+        actual_rev = sum(_net_revenue(s) for s in mp_sales_shop) - sum(_net_revenue(r) for r in mp_returns_shop)
+        exp = sum(_sale_expenses(s) for s in mp_sales_shop)
+        gross = actual_rev - exp
         cost = sum(
             _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
-            for s in sales
-            if s.shop_id == shop.id and s.external_sku in products
+            for s in mp_sales_shop
+            if s.external_sku in products
         )
         net = gross - cost
-        ads = sum(_to_decimal(s.advertising) for s in sales if s.shop_id == shop.id)
+        ads = sum(_to_decimal(s.advertising) for s in mp_sales_shop)
         drr_mp = (ads / rev * 100) if rev > 0 else Decimal(0)
 
         mp_comparison.append(
@@ -416,7 +419,7 @@ async def get_dashboard(
         p_actual_revenue = sum(_buyer_revenue(s) for s in p_sales)
         p_expenses = sum(_sale_expenses(s) for s in p_sales)
         p_ads = sum(_to_decimal(s.advertising) for s in p_sales)
-        p_gross = p_revenue - p_expenses
+        p_gross = p_actual_revenue - p_expenses
         p_qty = sum(s.quantity or 0 for s in p_sales)
         p_cost = _to_decimal(p.cost_price) * p_qty
         p_net = p_gross - p_cost
