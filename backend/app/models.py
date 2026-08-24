@@ -152,6 +152,7 @@ class Sale(Base):
     )
     price = Column(Numeric(12, 2), default=0)
     customer_price = Column(Numeric(12, 2), default=0)
+    marketplace_discount = Column(Numeric(12, 2), default=0)
     revenue = Column(Numeric(12, 2), default=0)
     commission = Column(Numeric(12, 2), default=0)
     logistics = Column(Numeric(12, 2), default=0)

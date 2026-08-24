@@ -226,6 +226,7 @@ class OzonAdapter(MarketplaceAdapter):
                 # Use financial_data price when available; fallback to posting price.
                 price = Decimal(str(pf.get("price", product.get("price", "0")) if pf else product.get("price", "0") or "0"))
                 customer_price = Decimal(str(pf.get("customer_price", 0) or 0)) if pf else Decimal(0)
+                marketplace_discount = max(price - customer_price, Decimal(0)) * quantity
                 orders.append({
                     "date": created_at,
                     "external_sku": str(product.get("offer_id", "")),
@@ -233,6 +234,7 @@ class OzonAdapter(MarketplaceAdapter):
                     "quantity": quantity,
                     "price": price,
                     "customer_price": customer_price,
+                    "marketplace_discount": marketplace_discount,
                     "revenue": price * quantity,
                     "status": item.get("status", ""),
                     **expenses,
@@ -250,6 +252,7 @@ class OzonAdapter(MarketplaceAdapter):
                 pf = self._get_product_financial(item, product)
                 price = Decimal(str(pf.get("price", product.get("price", "0")) if pf else product.get("price", "0") or "0"))
                 customer_price = Decimal(str(pf.get("customer_price", 0) or 0)) if pf else Decimal(0)
+                marketplace_discount = max(price - customer_price, Decimal(0)) * quantity
                 orders.append({
                     "date": created_at,
                     "external_sku": str(product.get("offer_id", "")),
@@ -257,6 +260,7 @@ class OzonAdapter(MarketplaceAdapter):
                     "quantity": quantity,
                     "price": price,
                     "customer_price": customer_price,
+                    "marketplace_discount": marketplace_discount,
                     "revenue": price * quantity,
                     "status": item.get("status", ""),
                     **expenses,

@@ -173,9 +173,13 @@ async def get_dashboard(
             return cp * (s.quantity or 0)
         return _to_decimal(s.revenue)
 
+    def _actual_revenue(s: Sale) -> Decimal:
+        """Net revenue plus marketplace discount compensation (e.g. Ozon points)."""
+        return _net_revenue(s) + _to_decimal(s.marketplace_discount)
+
     # Calculate KPIs
     total_revenue = sum(_gross_revenue(s) for s in sales) - sum(_gross_revenue(r) for r in returns)
-    total_actual_revenue = sum(_net_revenue(s) for s in sales) - sum(_net_revenue(r) for r in returns)
+    total_actual_revenue = sum(_actual_revenue(s) for s in sales) - sum(_actual_revenue(r) for r in returns)
     total_expenses = sum(_sale_expenses(s) for s in sales) + sum(
         _sale_expenses(r) for r in returns
     )
@@ -230,7 +234,7 @@ async def get_dashboard(
         day_adverts = adverts_by_day.get(day, [])
 
         day_revenue = sum(_gross_revenue(s) for s in day_sales) - sum(_gross_revenue(r) for r in day_returns)
-        day_actual_revenue = sum(_net_revenue(s) for s in day_sales) - sum(_net_revenue(r) for r in day_returns)
+        day_actual_revenue = sum(_actual_revenue(s) for s in day_sales) - sum(_actual_revenue(r) for r in day_returns)
         day_expenses = sum(_sale_expenses(s) for s in day_sales) + sum(
             _sale_expenses(r) for r in day_returns
         )
@@ -259,7 +263,7 @@ async def get_dashboard(
         mp_adverts = [a for a in adverts if a.shop_id == shop.id]
 
         mp_revenue = sum(_gross_revenue(s) for s in mp_sales) - sum(_gross_revenue(r) for r in mp_returns)
-        mp_actual_revenue = sum(_net_revenue(s) for s in mp_sales) - sum(_net_revenue(r) for r in mp_returns)
+        mp_actual_revenue = sum(_actual_revenue(s) for s in mp_sales) - sum(_actual_revenue(r) for r in mp_returns)
         mp_expenses = sum(_sale_expenses(s) for s in mp_sales) + sum(
             _sale_expenses(r) for r in mp_returns
         )
@@ -428,8 +432,8 @@ async def get_dashboard(
         p_revenue = sum(_to_decimal(s.revenue) for s in p_sales) - sum(
             _to_decimal(r.revenue) for r in p_returns
         )
-        p_actual_revenue = sum(_buyer_revenue(s) for s in p_sales) - sum(
-            _buyer_revenue(r) for r in p_returns
+        p_actual_revenue = sum(_actual_revenue(s) for s in p_sales) - sum(
+            _actual_revenue(r) for r in p_returns
         )
         p_expenses = sum(_sale_expenses(s) for s in p_sales) + sum(
             _sale_expenses(r) for r in p_returns
