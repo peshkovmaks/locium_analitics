@@ -139,6 +139,14 @@ class YandexMarketAdapter(MarketplaceAdapter):
                 price_value = Decimal(str(marketplace_price or buyer_price or 0))
                 customer_price_value = Decimal(str(buyer_price or marketplace_price or 0))
 
+                # Subsidies are discount-compensation accruals from Yandex Market.
+                # They need to be added to the seller's actual revenue.
+                subsidies = product.get("subsidies") or []
+                marketplace_discount = Decimal("0")
+                for sub in subsidies:
+                    if sub.get("operationType") == "ACCRUAL":
+                        marketplace_discount += Decimal(str(sub.get("amount", 0) or 0))
+
                 sales.append({
                     "date": sale_date,
                     "external_sku": shop_sku,
@@ -147,6 +155,7 @@ class YandexMarketAdapter(MarketplaceAdapter):
                     "quantity": quantity,
                     "price": price_value,
                     "customer_price": customer_price_value,
+                    "marketplace_discount": marketplace_discount,
                     "revenue": price_value * quantity,
                     "commission": Decimal("0"),
                     "logistics": Decimal("0"),
@@ -294,25 +303,45 @@ class YandexMarketAdapter(MarketplaceAdapter):
     async def get_finance_report(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         """Get finance report from Yandex Market.
 
-        Uses /v2/reports/united-marketplace-services/generate
-        This is async — first request generates report, then we poll for status.
-        Returns aggregated expenses per SKU.
+        Uses /v2/reports/united-marketplace-services/generate.
+        We request the report by year/month (act-formation date) because the
+        seller dashboard shows monthly accruals, and many services are charged
+        with a delay. This makes Yandex Market expenses comparable to the LK.
         """
         if not self.business_id:
             logger.warning("YM Business ID not available, skipping finance report")
             return []
 
-        try:
-            gen_response = await self._post(
-                "/v2/reports/united-marketplace-services/generate",
-                {
-                    "businessId": int(self.business_id) if self.business_id.isdigit() else 0,
-                    "dateFrom": date_from.strftime("%Y-%m-%d"),
-                    "dateTo": date_to.strftime("%Y-%m-%d"),
-                },
-            )
-        except httpx.HTTPStatusError as e:
-            logger.warning("YM finance report generation failed: %s", e)
+        # Try act-formation (year/month) first, because it matches the LK monthly
+        # totals. Fall back to accrual-date filtering if the API is rate-limited.
+        payloads = [
+            {
+                "businessId": int(self.business_id) if self.business_id.isdigit() else 0,
+                "year": date_to.year,
+                "month": date_to.month,
+            },
+            {
+                "businessId": int(self.business_id) if self.business_id.isdigit() else 0,
+                "dateFrom": date_from.strftime("%Y-%m-%d"),
+                "dateTo": date_to.strftime("%Y-%m-%d"),
+            },
+        ]
+
+        gen_response = None
+        for payload in payloads:
+            try:
+                gen_response = await self._post(
+                    "/v2/reports/united-marketplace-services/generate",
+                    payload,
+                )
+                break
+            except httpx.HTTPStatusError as e:
+                logger.warning("YM finance report generation attempt failed: %s", e)
+                await asyncio.sleep(2)
+                continue
+
+        if gen_response is None:
+            logger.warning("YM finance report generation failed for all payload variants")
             return []
 
         report_id = gen_response.get("result", {}).get("reportId") or gen_response.get("reportId")
@@ -345,9 +374,14 @@ class YandexMarketAdapter(MarketplaceAdapter):
             logger.warning("YM finance report did not become ready in time")
             return []
 
-        return await self._download_and_parse_ym_report(file_url)
+        return await self._download_and_parse_ym_report(file_url, date_from, date_to)
 
-    async def _download_and_parse_ym_report(self, file_url: str) -> List[Dict[str, Any]]:
+    async def _download_and_parse_ym_report(
+        self,
+        file_url: str,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+    ) -> List[Dict[str, Any]]:
         """Download YM unified marketplace services report and aggregate expenses by SKU.
 
         Yandex Market returns the report as an XLSX file (a ZIP archive containing
@@ -371,13 +405,63 @@ class YandexMarketAdapter(MarketplaceAdapter):
         sheet_categories = {
             "размещение товара": "commission",
             "размещение товаров и услуг": "commission",
+            "order for sale": "commission",
+            "warehouse processing": "logistics",
+            "acceptance of supply": "logistics",
             "буст продаж": "advertising",
+            "sales boost": "advertising",
+            "installment plan": "advertising",
+            "shelves": "advertising",
+            "boost sales with pay-per-views": "advertising",
+            "product banners": "advertising",
+            "banners": "advertising",
+            "push-notifications": "advertising",
+            "pop-up notifications": "advertising",
             "доставка покупателю": "logistics",
+            "delivery to buyer": "logistics",
+            "доставка (средняя миля)": "logistics",
+            "delivery (middle mile)": "logistics",
+            "express delivery": "logistics",
+            "delivery from abroad": "logistics",
             "страхование": "insurance",
+            "insurance": "insurance",
             "эквайринг": "acquiring",
-            "приём платежа покупателя": "other",
-            "перевод платежа покупателя": "other",
+            "acquiring": "acquiring",
+            "приём платежа": "acquiring",
+            "payment acceptance": "acquiring",
+            "перевод платежа": "acquiring",
+            "payment transfer": "acquiring",
+            "order for payment transfer": "acquiring",
+            "loyalty program and reviews": "other",
+            "подписки": "other",
+            "subscriptions": "other",
         }
+
+        def _sheet_category(sheet_name: str) -> Optional[str]:
+            lowered = sheet_name.lower()
+            for key, cat in sheet_categories.items():
+                if key in lowered:
+                    return cat
+            return None
+
+        def _parse_datetime(value: Any) -> Optional[datetime]:
+            if not value:
+                return None
+            text = str(value).strip()
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                try:
+                    return datetime.strptime(text[:len(fmt)], fmt)
+                except ValueError:
+                    continue
+            return None
+
+        def _in_range(value: Any) -> bool:
+            if date_from is None or date_to is None:
+                return True
+            parsed = _parse_datetime(value)
+            if parsed is None:
+                return True
+            return date_from <= parsed <= date_to
 
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as z:
@@ -390,6 +474,10 @@ class YandexMarketAdapter(MarketplaceAdapter):
                     if not rows:
                         continue
 
+                    sheet_id = sheet_file.replace("xl/worksheets/sheet", "").replace(".xml", "")
+                    sheet_name = sheet_names.get(sheet_id, "")
+                    default_category = _sheet_category(sheet_name)
+
                     # Find header row
                     header_row_index = None
                     header_map: Dict[str, int] = {}
@@ -400,33 +488,45 @@ class YandexMarketAdapter(MarketplaceAdapter):
                             header_map = {c: i for i, c in enumerate(cells) if c}
                             break
 
-                    if not header_row_index:
+                    # Some sheets (e.g. Subscriptions) have no SKU column.
+                    # Aggregate those expenses under an empty SKU so they are
+                    # distributed to all sales later.
+                    has_sku = header_row_index is not None and self._find_col(header_map, "ваш sku") is not None
+                    if has_sku:
+                        sku_idx = self._find_col(header_map, "ваш sku")
+                    else:
+                        sku_idx = None
+
+                    amount_idx = self._find_col(header_map, "стоимость услуги") if header_map else None
+                    if amount_idx is None:
+                        # Fallback: look for a final service-cost column on sheets
+                        # without the standard header (should not normally happen).
                         continue
 
-                    sku_idx = self._find_col(header_map, "ваш sku")
-                    amount_idx = self._find_col(header_map, "стоимость услуги")
-                    service_idx = self._find_col(header_map, "услуга")
-                    if sku_idx is None or amount_idx is None:
+                    service_idx = self._find_col(header_map, "услуга") if header_map else None
+                    date_idx = self._find_col(header_map, "дата и время оказания услуги") if header_map else None
+                    if date_idx is None and header_map:
+                        date_idx = self._find_col(header_map, "дата оказания услуги")
+
+                    # If we could not find a header row at all but the sheet has a
+                    # known category, skip it — we cannot safely aggregate.
+                    if not header_row_index and default_category is None:
                         continue
 
-                    # Determine default category by sheet title when service column
-                    # is missing; otherwise each row's service name decides.
-                    default_category = None
-                    for title_row in rows[:2]:
-                        title_text = " ".join(str(c) for c in title_row if c).lower()
-                        for key, cat in sheet_categories.items():
-                            if key in title_text:
-                                default_category = cat
-                                break
-                        if default_category:
-                            break
+                    for row in rows[(header_row_index or 0) + 1:]:
+                        if sku_idx is not None:
+                            if sku_idx >= len(row):
+                                continue
+                            sku = str(row[sku_idx]).strip()
+                        else:
+                            sku = ""
 
-                    for row in rows[header_row_index + 1:]:
-                        if sku_idx >= len(row):
+                        if sku_idx is not None and not sku:
                             continue
-                        sku = str(row[sku_idx]).strip()
-                        if not sku:
-                            continue
+
+                        if date_idx is not None and date_idx < len(row):
+                            if not _in_range(row[date_idx]):
+                                continue
 
                         try:
                             amount = Decimal(str(row[amount_idx] if amount_idx < len(row) else "0").replace(",", "."))
@@ -436,7 +536,7 @@ class YandexMarketAdapter(MarketplaceAdapter):
                         category = default_category
                         if service_idx is not None and service_idx < len(row):
                             service_name = str(row[service_idx]).lower()
-                            category = self._categorize_ym_service(service_name, sheet_categories)
+                            category = self._categorize_ym_service(service_name, sheet_categories) or default_category
 
                         if not category:
                             continue

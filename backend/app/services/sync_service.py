@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.adapters.base import AdapterFactory
 from app.adapters.wildberries import RateLimitExceeded
-from app.models import Shop, Sale, Stock, Advert, Product, ProductShopMapping, SyncLog, ShopBalance
+from app.models import Shop, Sale, Stock, Advert, Product, ProductShopMapping, SyncLog, ShopBalance, FinanceTransaction
 
 
 class SyncService:
@@ -36,10 +36,12 @@ class SyncService:
         mutating the ORM shop.credentials field.
         date_from/date_to override days_back when provided (used by initial_sync).
         """
+        from app.utils.encryption import decrypt_dict
+
         adapter = AdapterFactory.create(
             shop.marketplace.value,
             str(shop.id),
-            credentials if credentials is not None else shop.credentials,
+            credentials if credentials is not None else decrypt_dict(shop.credentials),
         )
 
         if not await adapter.authenticate():
@@ -171,6 +173,9 @@ class SyncService:
                 finance = await adapter.get_finance_report(date_from, date_to)
                 if finance:
                     await self._update_finance_data(shop.id, finance, date_from, date_to)
+                    await self._save_finance_transactions(
+                        shop.id, shop.marketplace, finance, date_from, date_to
+                    )
                     results["finance"] = {"status": "success", "count": len(finance), "message": None}
                 else:
                     results["finance"] = {"status": "success", "count": 0, "message": "No finance data"}
@@ -519,6 +524,64 @@ class SyncService:
             )
             self.db.add(new_mapping)
 
+    async def _save_finance_transactions(
+        self,
+        shop_id,
+        marketplace,
+        finance: List[Dict[str, Any]],
+        date_from: datetime,
+        date_to: datetime,
+    ):
+        """Persist normalized finance transactions by operation date.
+
+        Used by the dashboard to sum Ozon expenses by the date they were charged,
+        independent of the original sale date. Existing rows for the same shop and
+        date range are replaced so repeated syncs stay idempotent.
+        """
+        if not finance:
+            return
+
+        # Only normalized transaction rows have ``category``/``amount``.
+        transactions = [
+            item for item in finance
+            if "category" in item and "amount" in item
+        ]
+        if not transactions:
+            return
+
+        await self.db.execute(
+            delete(FinanceTransaction).where(
+                FinanceTransaction.shop_id == shop_id,
+                FinanceTransaction.operation_date >= date_from,
+                FinanceTransaction.operation_date <= date_to,
+            )
+        )
+
+        for item in transactions:
+            operation_date = item.get("operation_date")
+            if isinstance(operation_date, str):
+                try:
+                    operation_date = datetime.fromisoformat(operation_date.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    operation_date = date_from
+            if operation_date and operation_date.tzinfo:
+                operation_date = operation_date.replace(tzinfo=None)
+
+            self.db.add(
+                FinanceTransaction(
+                    shop_id=shop_id,
+                    marketplace=marketplace,
+                    operation_date=operation_date or date_from,
+                    posting_number=item.get("posting_number"),
+                    external_sku=item.get("external_sku"),
+                    operation_type=item.get("operation_type"),
+                    operation_name=item.get("operation_name"),
+                    category=item.get("category"),
+                    amount=Decimal(str(item.get("amount", 0) or 0)),
+                    raw_data=item.get("raw") or {},
+                )
+            )
+
     async def _update_finance_data(
         self, shop_id, finance: List[Dict[str, Any]], date_from: datetime, date_to: datetime
     ):
@@ -530,11 +593,35 @@ class SyncService:
         revenue; for SKU-level reports the amount is attached directly to all
         matching sales rows.
 
+        Finance rows can be supplied either as aggregated buckets (legacy format
+        with commission/logistics/... keys) or as normalized transactions with
+        ``category`` and ``amount``. The latter is normalized here before
+        distribution.
+
         Expense columns are reset before each sync so repeated runs do not double
         count the same transactions.
         """
         if not finance:
             return
+
+        EXPENSE_KEYS = ["commission", "logistics", "storage", "advertising", "returns", "insurance", "acquiring", "other"]
+
+        def _normalize(item: Dict[str, Any]) -> Dict[str, Any]:
+            """Convert a transaction-style row into the legacy bucket format."""
+            if "category" in item and "amount" in item:
+                bucket = {k: Decimal("0") for k in EXPENSE_KEYS}
+                cat = item.get("category")
+                if cat in bucket:
+                    bucket[cat] = Decimal(str(item.get("amount", 0) or 0))
+                return {
+                    "external_id": item.get("posting_number"),
+                    "posting_number": item.get("posting_number"),
+                    "external_sku": item.get("external_sku"),
+                    **bucket,
+                }
+            return item
+
+        finance = [_normalize(item) for item in finance]
 
         await self.db.execute(
             update(Sale)
@@ -555,7 +642,6 @@ class SyncService:
             )
         )
 
-        EXPENSE_KEYS = ["commission", "logistics", "storage", "advertising", "returns", "insurance", "acquiring", "other"]
         unallocated: Dict[str, Decimal] = {k: Decimal("0") for k in EXPENSE_KEYS}
 
         for item in finance:
@@ -572,8 +658,10 @@ class SyncService:
                     )
                 )
                 sales = result.scalars().all()
-            elif sku:
-                # Yandex Market finance report is keyed by shop SKU.
+            elif sku is not None:
+                # Yandex Market finance report is keyed by shop SKU. Empty SKU
+                # means a shop-level charge (e.g. subscription) that cannot be
+                # tied to a product, so it is treated as unallocated.
                 result = await self.db.execute(
                     select(Sale).where(
                         Sale.shop_id == shop_id,

@@ -76,6 +76,24 @@ function KPICard({ label, value, wow, wowColor, breakdown, sparklineData, sparkl
   );
 }
 
+function OrderStatCard({ label, value, wow, wowColor, subtext, sparklineData, sparklineColor = '#3b82f6' }) {
+  return (
+    <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+      <p className="text-sm text-gray-500 mb-1">{label}</p>
+      <p className="text-xl font-bold text-gray-900">{value}</p>
+      {subtext && <p className="text-xs text-gray-400 mt-1">{subtext}</p>}
+      {sparklineData && sparklineData.length > 0 && (
+        <div className="mt-2">
+          <MiniSparkline values={sparklineData} color={sparklineColor} />
+        </div>
+      )}
+      {wow !== undefined && wow !== null && (
+        <p className={classNames('text-xs mt-2 font-medium', wowColor)}>{wow}</p>
+      )}
+    </div>
+  );
+}
+
 function useChart(createFn) {
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
@@ -129,27 +147,88 @@ function MiniSparkline({ values, color = '#3b82f6' }) {
   return <canvas ref={ref} width={80} height={30} />;
 }
 
-function RevenueLineChart({ data }) {
+function MiniTrend({ values, color = '#3b82f6', height = 24, barWidth = 3, gap = 1 }) {
+  const [tooltip, setTooltip] = useState(null);
+  if (!values || values.length === 0) {
+    return <span className="text-gray-400">—</span>;
+  }
+  const max = Math.max(...values, 1);
+  const totalWidth = values.length * (barWidth + gap) + gap;
+  return (
+    <div className="relative inline-flex">
+      <svg width={totalWidth} height={height} className="mx-auto">
+        {values.map((v, i) => {
+          const h = (v / max) * height;
+          const x = i * (barWidth + gap) + gap;
+          const y = height - h;
+          return (
+            <rect
+              key={i}
+              x={x}
+              y={y}
+              width={barWidth}
+              height={h}
+              rx={1}
+              fill={color}
+              onMouseEnter={(e) => setTooltip({ x: e.clientX, y: e.clientY, value: v })}
+              onMouseMove={(e) => setTooltip({ x: e.clientX, y: e.clientY, value: v })}
+              onMouseLeave={() => setTooltip(null)}
+            />
+          );
+        })}
+      </svg>
+      {tooltip && (
+        <div
+          className="fixed px-2 py-1 bg-gray-900 text-white text-xs rounded shadow z-50 pointer-events-none"
+          style={{ left: tooltip.x + 8, top: tooltip.y - 28 }}
+        >
+          {formatMoney(tooltip.value)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RevenueLineChart({ dailyTrend }) {
   const labels = useMemo(() => {
-    const days = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      days.push(d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }));
-    }
-    return days;
-  }, []);
+    if (!Array.isArray(dailyTrend) || dailyTrend.length === 0) return [];
+    return dailyTrend.map((row) => {
+      const d = new Date(row.date);
+      return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+    });
+  }, [dailyTrend]);
 
   const createChart = useMemo(() => (canvas) => {
     const ctx = canvas.getContext('2d');
-    const datasets = data.map((mp) => ({
-      label: mp.marketplace,
-      data: labels.map(() => Math.round(Number(mp.revenue || 0) / 7 * (0.85 + Math.random() * 0.3))),
-      borderColor: MP_COLORS[mp.key] || MP_COLORS.ozon,
-      backgroundColor: MP_COLORS[mp.key] || MP_COLORS.ozon,
-      tension: 0.3,
-      pointRadius: 0,
-    }));
+    if (!Array.isArray(dailyTrend) || dailyTrend.length === 0) {
+      return new window.Chart(ctx, { type: 'line', data: { labels: [], datasets: [] }, options: { plugins: { legend: { display: false } } } });
+    }
+    const datasets = [
+      {
+        label: MP_NAMES.wb,
+        data: dailyTrend.map((row) => Number(row.wb_revenue || 0)),
+        borderColor: MP_COLORS.wb,
+        backgroundColor: MP_COLORS.wb,
+        tension: 0.3,
+        pointRadius: 0,
+      },
+      {
+        label: MP_NAMES.ozon,
+        data: dailyTrend.map((row) => Number(row.ozon_revenue || 0)),
+        borderColor: MP_COLORS.ozon,
+        backgroundColor: MP_COLORS.ozon,
+        tension: 0.3,
+        pointRadius: 0,
+      },
+      {
+        label: MP_NAMES.ym,
+        data: dailyTrend.map((row) => Number(row.ym_revenue || 0)),
+        borderColor: MP_COLORS.ym,
+        backgroundColor: MP_COLORS.ym,
+        tension: 0.3,
+        pointRadius: 0,
+      },
+    ].filter((ds) => ds.data.some((v) => v > 0));
     return new window.Chart(ctx, {
       type: 'line',
       data: { labels, datasets },
@@ -161,69 +240,40 @@ function RevenueLineChart({ data }) {
         scales: { y: { beginAtZero: true, grid: { color: '#f3f4f6' } }, x: { grid: { display: false } } },
       },
     });
-  }, [data, labels]);
+  }, [dailyTrend, labels]);
 
   const ref = useChart(createChart);
   return <canvas ref={ref} />;
 }
 
-function RevenueShareChart({ data }) {
+function ExpenseStructureChart({ expenseStructure }) {
   const createChart = useMemo(() => (canvas) => {
     const ctx = canvas.getContext('2d');
-    return new window.Chart(ctx, {
-      type: 'doughnut',
-      data: {
-        labels: data.map((d) => d.marketplace),
-        datasets: [{
-          data: data.map((d) => Number(d.revenue)),
-          backgroundColor: data.map((d) => MP_COLORS[d.key] || '#9ca3af'),
-          borderWidth: 0,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '70%',
-        plugins: { legend: { display: false } },
-      },
-    });
-  }, [data]);
-
-  const ref = useChart(createChart);
-  return <canvas ref={ref} />;
-}
-
-function ExpenseStructureChart({ totalRevenue, mpData }) {
-  const createChart = useMemo(() => (canvas) => {
-    const ctx = canvas.getContext('2d');
-    // Approximate expense split using weighted average ratios
-    const weights = {};
-    let totalRev = 0;
-    mpData.forEach((mp) => {
-      totalRev += Number(mp.revenue);
-    });
-    const ratios = {
-      wb: { commission: 0.15, logistics: 0.10, storage: 0.02, ads: 0.08, returns: 0.02, other: 0.01 },
-      ozon: { commission: 0.12, logistics: 0.10, storage: 0.02, ads: 0.05, returns: 0.02, other: 0.01 },
-      ym: { commission: 0.10, logistics: 0.10, storage: 0.02, ads: 0.04, returns: 0.02, other: 0.01 },
+    const colors = {
+      commission: '#3b82f6',
+      logistics: '#8b5cf6',
+      storage: '#22c55e',
+      ads: '#ef4444',
+      returns: '#f59e0b',
+      other: '#9ca3af',
     };
-    const agg = { commission: 0, logistics: 0, storage: 0, ads: 0, returns: 0, other: 0 };
-    mpData.forEach((mp) => {
-      const r = ratios[mp.key] || ratios.ozon;
-      const rev = Number(mp.revenue);
-      Object.keys(r).forEach((k) => {
-        agg[k] += rev * r[k];
+    const items = Object.entries(expenseStructure || {})
+      .filter(([_, v]) => Number(v) > 0)
+      .sort((a, b) => Number(b[1]) - Number(a[1]));
+    if (items.length === 0) {
+      return new window.Chart(ctx, {
+        type: 'doughnut',
+        data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderWidth: 0 }] },
+        options: { plugins: { legend: { display: false } } },
       });
-    });
-    const items = Object.entries(agg).sort((a, b) => b[1] - a[1]);
-    const colors = ['#3b82f6', '#8b5cf6', '#ef4444', '#22c55e', '#9ca3af', '#d1d5db'];
+    }
     return new window.Chart(ctx, {
       type: 'doughnut',
       data: {
         labels: items.map(([k]) => EXPENSE_LABELS[k]),
         datasets: [{
-          data: items.map(([, v]) => v),
-          backgroundColor: colors.slice(0, items.length),
+          data: items.map(([, v]) => Number(v)),
+          backgroundColor: items.map(([k]) => colors[k] || '#9ca3af'),
           borderWidth: 0,
         }],
       },
@@ -234,7 +284,7 @@ function ExpenseStructureChart({ totalRevenue, mpData }) {
         plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 11 } } } },
       },
     });
-  }, [totalRevenue, mpData]);
+  }, [expenseStructure]);
 
   const ref = useChart(createChart);
   return <canvas ref={ref} />;
@@ -453,9 +503,20 @@ function UnitEconomicsTable({ rows }) {
   );
 }
 
-function ProductsTable({ rows }) {
+function ProductsTable({ rows, unitEconomics }) {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('revenue');
+  const [expandedRows, setExpandedRows] = useState(new Set());
+  const [zeroOpen, setZeroOpen] = useState(false);
+
+  const unitMap = useMemo(() => {
+    const map = {};
+    if (!Array.isArray(unitEconomics)) return map;
+    unitEconomics.forEach((u) => {
+      if (u && u.sku) map[u.sku] = u;
+    });
+    return map;
+  }, [unitEconomics]);
 
   const filtered = useMemo(() => {
     let data = rows.filter((p) => {
@@ -466,10 +527,148 @@ function ProductsTable({ rows }) {
     return data;
   }, [rows, search, sortBy]);
 
+  const activeRows = useMemo(() => filtered.filter((p) => Number(p.revenue) > 0), [filtered]);
+  const zeroRows = useMemo(() => filtered.filter((p) => Number(p.revenue) === 0), [filtered]);
+
+  const toggleRow = (sku) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(sku)) next.delete(sku);
+      else next.add(sku);
+      return next;
+    });
+  };
+
+  const renderExpandIcon = (isExpanded) => (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="currentColor"
+      className={classNames('transition-transform duration-200', isExpanded ? 'rotate-180' : '')}
+    >
+      <path d="M6 8L1 3h10L6 8z" />
+    </svg>
+  );
+
+  const TableHead = () => (
+    <thead className="text-gray-500 border-b">
+      <tr>
+        <th className="text-left py-2 font-normal w-8"></th>
+        <th className="text-left py-2 font-normal">SKU</th>
+        <th className="text-left py-2 font-normal">Название</th>
+        <th className="text-right py-2 font-normal">Выручка</th>
+        <th className="text-right py-2 font-normal">Чистая</th>
+        <th className="text-right py-2 font-normal">Маржа</th>
+        <th className="text-right py-2 font-normal">ДРР</th>
+        <th className="text-right py-2 font-normal">Средняя цена</th>
+        <th className="text-right py-2 font-normal">Мин. цена</th>
+      </tr>
+    </thead>
+  );
+
+  const renderProductRows = (items) =>
+    items.flatMap((p) => {
+      const margin = Number(p.margin);
+      const drr = Number(p.drr);
+      const isExpanded = expandedRows.has(p.sku);
+      const unit = unitMap[p.sku];
+      const hasUnit = unit && Array.isArray(unit.rows) && unit.rows.length > 0;
+      const result = [];
+
+      result.push(
+        <tr
+          key={`${p.sku}-main`}
+          className={classNames('border-b', hasUnit ? 'cursor-pointer hover:bg-gray-50' : '')}
+          onClick={() => hasUnit && toggleRow(p.sku)}
+        >
+          <td className="py-3 text-gray-400">
+            {hasUnit && renderExpandIcon(isExpanded)}
+          </td>
+          <td className="py-3 text-gray-500 font-mono text-xs">{p.sku}</td>
+          <td className="py-3 text-gray-900 truncate max-w-[220px]">{p.name}</td>
+          <td className="text-right tabular-nums">{formatMoney(p.revenue)}</td>
+          <td className="text-right tabular-nums font-medium">{formatMoney(p.net_profit)}</td>
+          <td className={classNames('text-right font-medium', margin >= 25 ? 'text-green-600' : margin >= 15 ? 'text-gray-900' : 'text-red-600')}>
+            {formatPercent(margin)}
+          </td>
+          <td className={classNames('text-right font-medium', drr <= 10 ? 'text-green-600' : drr <= 15 ? 'text-yellow-600' : 'text-red-600')}>
+            {formatPercent(drr)}
+          </td>
+          <td className="text-right tabular-nums text-gray-500">{formatMoney(p.avg_price)}</td>
+          <td className="text-right tabular-nums text-gray-400">{formatMoney(p.min_price)}</td>
+        </tr>
+      );
+
+      if (isExpanded && hasUnit) {
+        result.push(
+          <tr key={`${p.sku}-unit`} className="bg-gray-50/70 border-b">
+            <td></td>
+            <td colSpan="8" className="py-3">
+              <div className="text-xs font-medium text-gray-500 mb-2">Юнит-экономика по площадкам</div>
+              <table className="w-full text-xs min-w-[700px]">
+                <thead className="text-gray-500 border-b">
+                  <tr>
+                    <th className="text-left py-1.5 font-normal">Площадка</th>
+                    <th className="text-right py-1.5 font-normal">Продано</th>
+                    <th className="text-right py-1.5 font-normal">Цена</th>
+                    <th className="text-right py-1.5 font-normal">Себест.</th>
+                    <th className="text-right py-1.5 font-normal">Расх. МП</th>
+                    <th className="text-right py-1.5 font-normal">Чистая/шт</th>
+                    <th className="text-right py-1.5 font-normal">Маржа</th>
+                    <th className="text-center py-1.5 font-normal w-24">Тренд выручки</th>
+                    <th className="text-right py-1.5 font-normal">ДРР</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unit.rows.map((r) => {
+                    const key = MP_KEY_BY_NAME[r.marketplace] || 'ozon';
+                    const margin = Number(r.margin);
+                    const drr = Number(r.drr);
+                    return (
+                      <tr key={r.marketplace} className="border-b border-gray-100">
+                        <td className="py-2">
+                          <Badge color={MP_COLORS[key]}>
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: MP_COLORS[key] }} />
+                            {r.marketplace}
+                          </Badge>
+                        </td>
+                        <td className="text-right tabular-nums">{r.sales}</td>
+                        <td className="text-right tabular-nums">{formatMoney(r.price)}</td>
+                        <td className="text-right text-gray-500 tabular-nums">{formatMoney(r.cost)}</td>
+                        <td className="text-right text-gray-500 tabular-nums">{formatMoney(r.expense_per_unit)}</td>
+                        <td className="text-right">
+                          <span className={classNames('inline-block px-2 py-0.5 rounded-md font-medium', Number(r.net_per_unit) >= 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600')}>
+                            {Number(r.net_per_unit) >= 0 ? '+' : ''}{formatMoney(r.net_per_unit)}
+                          </span>
+                        </td>
+                        <td className={classNames('text-right font-medium', margin >= 25 ? 'text-green-600' : margin >= 15 ? 'text-gray-900' : 'text-red-600')}>
+                          {formatPercent(margin)}
+                        </td>
+                        <td className="py-2 text-center w-24">
+                          <MiniTrend values={r.trend} color={MP_COLORS[key]} />
+                        </td>
+                        <td className={classNames('text-right font-medium', drr <= 10 ? 'text-green-600' : drr <= 15 ? 'text-yellow-600' : 'text-red-600')}>
+                          {formatPercent(drr)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </td>
+          </tr>
+        );
+      }
+
+      return result;
+    });
+
   return (
     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 overflow-x-auto">
       <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
         <h3 className="font-semibold">Товары</h3>
+        <div className="text-sm text-gray-500">Кликните по строке, чтобы увидеть юнит-экономику</div>
         <div className="flex gap-2">
           <input
             type="text"
@@ -490,49 +689,33 @@ function ProductsTable({ rows }) {
           </select>
         </div>
       </div>
+
       <table className="w-full text-sm min-w-[900px]">
-        <thead className="text-gray-500 border-b">
-          <tr>
-            <th className="text-left py-2 font-normal">SKU</th>
-            <th className="text-left py-2 font-normal">Название</th>
-            <th className="text-right py-2 font-normal">Выручка</th>
-            <th className="text-right py-2 font-normal">Чистая</th>
-            <th className="text-right py-2 font-normal">Маржа</th>
-            <th className="text-right py-2 font-normal">ДРР</th>
-            <th className="text-right py-2 font-normal">Средняя цена</th>
-            <th className="text-right py-2 font-normal">Мин. цена</th>
-            <th className="text-right py-2 font-normal">Остаток</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map((p) => {
-            const margin = Number(p.margin);
-            const drr = Number(p.drr);
-            return (
-              <tr key={p.sku} className="border-b">
-                <td className="py-3 text-gray-500 font-mono text-xs">{p.sku}</td>
-                <td className="py-3 text-gray-900 truncate max-w-[220px]">{p.name}</td>
-                <td className="text-right tabular-nums">{formatMoney(p.revenue)}</td>
-                <td className="text-right tabular-nums font-medium">{formatMoney(p.net_profit)}</td>
-                <td className={classNames('text-right font-medium', margin >= 25 ? 'text-green-600' : margin >= 15 ? 'text-gray-900' : 'text-red-600')}>
-                  {formatPercent(margin)}
-                </td>
-                <td className={classNames('text-right font-medium', drr <= 10 ? 'text-green-600' : drr <= 15 ? 'text-yellow-600' : 'text-red-600')}>
-                  {formatPercent(drr)}
-                </td>
-                <td className="text-right tabular-nums text-gray-500">{formatMoney(p.avg_price)}</td>
-                <td className="text-right tabular-nums text-gray-400">{formatMoney(p.min_price)}</td>
-                <td className={classNames('text-right tabular-nums', p.total_stock < 20 ? 'text-red-600 font-medium' : 'text-gray-500')}>
-                  {p.total_stock}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
+        <TableHead />
+        <tbody>{renderProductRows(activeRows)}</tbody>
       </table>
+
+      {zeroRows.length > 0 && (
+        <div className="mt-4 border-t border-gray-100 pt-4">
+          <button
+            onClick={() => setZeroOpen(!zeroOpen)}
+            className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 font-medium"
+          >
+            <span>Товары без продаж ({zeroRows.length})</span>
+            <span>{zeroOpen ? '▲' : '▼'}</span>
+          </button>
+          {zeroOpen && (
+            <table className="w-full text-sm min-w-[900px] mt-3">
+              <TableHead />
+              <tbody>{renderProductRows(zeroRows)}</tbody>
+            </table>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
 
 function BalancesSection({ items, loading, error }) {
   if (loading) {
@@ -619,6 +802,7 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [alertsOpen, setAlertsOpen] = useState(true);
 
   const [balanceItems, setBalanceItems] = useState([]);
   const [balancesLoading, setBalancesLoading] = useState(true);
@@ -748,7 +932,7 @@ export default function Dashboard() {
         <KPICard
           label="Выручка"
           value={formatMoney(kpi.revenue)}
-          wow={`${kpi.revenue_wow > 0 ? '+' : ''}${kpi.revenue_wow}% к прошлой неделе`}
+          wow={`${kpi.revenue_wow > 0 ? '+' : ''}${kpi.revenue_wow}% к прошлому периоду`}
           wowColor={kpi.revenue_wow >= 0 ? 'text-green-600' : 'text-red-600'}
           breakdown={kpiBreakdown.map((mp) => ({
             marketplace: mp.marketplace,
@@ -763,7 +947,7 @@ export default function Dashboard() {
         <KPICard
           label="Фактическая выручка"
           value={formatMoney(kpi.actual_revenue)}
-          wow={`${kpi.revenue_wow > 0 ? '+' : ''}${kpi.revenue_wow}% к прошлой неделе`}
+          wow={`${kpi.revenue_wow > 0 ? '+' : ''}${kpi.revenue_wow}% к прошлому периоду`}
           wowColor={kpi.revenue_wow >= 0 ? 'text-green-600' : 'text-red-600'}
           breakdown={kpiBreakdown.map((mp) => ({
             marketplace: mp.marketplace,
@@ -778,7 +962,7 @@ export default function Dashboard() {
         <KPICard
           label="Валовая прибыль"
           value={formatMoney(kpi.gross_profit)}
-          wow={`${kpi.gross_wow > 0 ? '+' : ''}${kpi.gross_wow}% к прошлой неделе`}
+          wow={`${kpi.gross_wow > 0 ? '+' : ''}${kpi.gross_wow}% к прошлому периоду`}
           wowColor={kpi.gross_wow >= 0 ? 'text-green-600' : 'text-red-600'}
           breakdown={kpiBreakdown.map((mp) => ({
             marketplace: mp.marketplace,
@@ -793,7 +977,7 @@ export default function Dashboard() {
         <KPICard
           label="Чистая прибыль"
           value={formatMoney(kpi.net_profit)}
-          wow={`${kpi.net_wow > 0 ? '+' : ''}${kpi.net_wow}% к прошлой неделе`}
+          wow={`${kpi.net_wow > 0 ? '+' : ''}${kpi.net_wow}% к прошлому периоду`}
           wowColor={kpi.net_wow >= 0 ? 'text-green-600' : 'text-red-600'}
           breakdown={kpiBreakdown.map((mp) => ({
             marketplace: mp.marketplace,
@@ -822,29 +1006,105 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Alerts */}
-      <div>
-        <h2 className="text-sm font-medium mb-2">Алерты</h2>
-        <div className="flex flex-wrap gap-2">
-          {data.alerts.length === 0 ? (
-            <span className="text-sm text-gray-400">Алертов нет</span>
-          ) : (
-            data.alerts.map((a, i) => (
-              <div
-                key={i}
-                className={classNames(
-                  'flex items-center gap-2 px-3 py-2 rounded-lg text-xs border',
-                  a.type === 'danger'
-                    ? 'bg-red-50 border-red-500 text-red-700'
-                    : 'bg-yellow-50 border-yellow-500 text-yellow-700'
-                )}
-              >
-                <span className={classNames('w-1.5 h-1.5 rounded-full', a.type === 'danger' ? 'bg-red-500' : 'bg-yellow-500')} />
-                {a.text}
-              </div>
-            ))
-          )}
+      {/* Order stats */}
+      {data.order_stats && (
+        <div>
+          <h2 className="text-sm font-medium mb-2">По заказам</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+            <OrderStatCard
+              label="Заказов"
+              value={data.order_stats.orders_count}
+              wow={`${data.order_stats.orders_count_wow >= 0 ? '+' : ''}${data.order_stats.orders_count_wow}% к прошлому периоду`}
+              wowColor={data.order_stats.orders_count_wow >= 0 ? 'text-green-600' : 'text-red-600'}
+              sparklineData={data.order_stats.orders_count_trend}
+              sparklineColor="#3b82f6"
+            />
+            <OrderStatCard
+              label="Средний чек"
+              value={formatMoney(data.order_stats.average_check)}
+              wow={`${data.order_stats.average_check_wow >= 0 ? '+' : ''}${data.order_stats.average_check_wow}% к прошлому периоду`}
+              wowColor={data.order_stats.average_check_wow >= 0 ? 'text-green-600' : 'text-red-600'}
+              sparklineData={data.order_stats.average_check_trend}
+              sparklineColor="#8b5cf6"
+            />
+            <OrderStatCard
+              label="Прибыль на заказ"
+              value={formatMoney(data.order_stats.average_profit_per_order)}
+              wow={`${data.order_stats.average_profit_per_order_wow >= 0 ? '+' : ''}${data.order_stats.average_profit_per_order_wow}% к прошлому периоду`}
+              wowColor={data.order_stats.average_profit_per_order_wow >= 0 ? 'text-green-600' : 'text-red-600'}
+              sparklineData={data.order_stats.average_profit_per_order_trend}
+              sparklineColor="#22c55e"
+            />
+            <OrderStatCard
+              label="Прибыль на товар"
+              value={formatMoney(data.order_stats.profit_per_item)}
+              wow={`${data.order_stats.profit_per_item_wow >= 0 ? '+' : ''}${data.order_stats.profit_per_item_wow}% к прошлому периоду`}
+              wowColor={data.order_stats.profit_per_item_wow >= 0 ? 'text-green-600' : 'text-red-600'}
+              sparklineData={data.order_stats.profit_per_item_trend}
+              sparklineColor="#10b981"
+            />
+            <OrderStatCard
+              label="Возвратов"
+              value={data.order_stats.returns_count}
+              subtext={`${Number(data.order_stats.return_rate).toFixed(1)}% от всех заказов`}
+              wow={`${data.order_stats.returns_count_wow >= 0 ? '+' : ''}${data.order_stats.returns_count_wow}% к прошлому периоду`}
+              wowColor={data.order_stats.returns_count_wow <= 0 ? 'text-green-600' : 'text-red-600'}
+              sparklineData={data.order_stats.returns_count_trend}
+              sparklineColor="#ef4444"
+            />
+            <OrderStatCard
+              label="Товаров в заказе"
+              value={Number(data.order_stats.avg_items_per_order).toFixed(1)}
+              wow={`${data.order_stats.avg_items_per_order_wow >= 0 ? '+' : ''}${data.order_stats.avg_items_per_order_wow}% к прошлому периоду`}
+              wowColor={data.order_stats.avg_items_per_order_wow >= 0 ? 'text-green-600' : 'text-red-600'}
+              sparklineData={data.order_stats.avg_items_per_order_trend}
+              sparklineColor="#f59e0b"
+            />
+          </div>
         </div>
+      )}
+
+      {/* Alerts */}
+      <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-medium">Алерты</h2>
+            {data.alerts.length > 0 && (
+              <span className="inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600 rounded-full min-w-[1.5rem]">
+                {data.alerts.length}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => setAlertsOpen(!alertsOpen)}
+            className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+          >
+            {alertsOpen ? 'Свернуть' : 'Развернуть'}
+            <span>{alertsOpen ? '▲' : '▼'}</span>
+          </button>
+        </div>
+        {alertsOpen && (
+          <div className="flex flex-wrap gap-2">
+            {data.alerts.length === 0 ? (
+              <span className="text-sm text-gray-400">Алертов нет</span>
+            ) : (
+              data.alerts.map((a, i) => (
+                <div
+                  key={i}
+                  className={classNames(
+                    'flex items-center gap-2 px-3 py-2 rounded-lg text-xs border',
+                    a.type === 'danger'
+                      ? 'bg-red-50 border-red-500 text-red-700'
+                      : 'bg-yellow-50 border-yellow-500 text-yellow-700'
+                  )}
+                >
+                  <span className={classNames('w-1.5 h-1.5 rounded-full', a.type === 'danger' ? 'bg-red-500' : 'bg-yellow-500')} />
+                  {a.text}
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* Balances */}
@@ -855,33 +1115,41 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 lg:col-span-2">
           <h3 className="font-semibold mb-4">Выручка по площадкам</h3>
           <div className="h-64">
-            <RevenueLineChart data={mpRowsWithKeys} />
+            <RevenueLineChart dailyTrend={data.daily_trend} />
           </div>
         </div>
         <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-          <h3 className="font-semibold mb-4">Доля выручки</h3>
-          <div className="h-48 relative">
-            <RevenueShareChart data={mpRowsWithKeys} />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center">
-                <div className="text-xs text-gray-400">Всего</div>
-                <div className="text-lg font-semibold">{formatMoney(totalRevenue)}</div>
-              </div>
-            </div>
-          </div>
-          <div className="mt-4 space-y-2 text-sm">
+          <h3 className="font-semibold mb-4">% расходов</h3>
+          <div className="space-y-4">
             {mpRowsWithKeys.map((mp) => {
-              const pct = totalRevenue > 0 ? (Number(mp.revenue) / totalRevenue) * 100 : 0;
+              const rev = Number(mp.revenue || 0);
+              const exp = Number(mp.expenses || 0);
+              const pct = rev > 0 ? (exp / rev) * 100 : 0;
               return (
-                <div key={mp.marketplace} className="flex justify-between">
-                  <span className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full" style={{ background: MP_COLORS[mp.key] }} />
-                    {mp.marketplace}
-                  </span>
-                  <span className="font-medium">{pct.toFixed(1)}%</span>
+                <div key={mp.marketplace}>
+                  <div className="flex items-center justify-between text-sm mb-1.5">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full" style={{ background: MP_COLORS[mp.key] }} />
+                      {mp.marketplace}
+                    </span>
+                    <span className="font-semibold">{pct.toFixed(1)}%</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{ width: `${Math.min(pct, 100)}%`, background: MP_COLORS[mp.key] }}
+                    />
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500 text-right">{formatMoney(exp)}</div>
                 </div>
               );
             })}
+          </div>
+          <div className="mt-5 pt-4 border-t border-gray-100">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">Всего расходов</span>
+              <span className="font-semibold">{formatMoney(mpRowsWithKeys.reduce((sum, mp) => sum + Number(mp.expenses || 0), 0))}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -891,7 +1159,7 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
           <h3 className="font-semibold mb-4">Структура расходов</h3>
           <div className="h-56">
-            <ExpenseStructureChart totalRevenue={totalRevenue} mpData={mpRowsWithKeys} />
+            <ExpenseStructureChart expenseStructure={data.expense_structure} />
           </div>
         </div>
         <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
@@ -903,11 +1171,8 @@ export default function Dashboard() {
       {/* Marketplace comparison */}
       <MarketplaceComparisonTable rows={mpRowsWithKeys} />
 
-      {/* Unit economics */}
-      <UnitEconomicsTable rows={data.unit_economics} />
-
-      {/* Products */}
-      <ProductsTable rows={data.products} />
+      {/* Products with expandable unit economics */}
+      <ProductsTable rows={data.products} unitEconomics={data.unit_economics} />
     </div>
   );
 }

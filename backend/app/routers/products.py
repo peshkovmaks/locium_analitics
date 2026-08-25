@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
+from sqlalchemy.orm import selectinload
 from typing import List
 from decimal import Decimal
 
 from app.database import get_db
-from app.models import Product, User, ProductShopMapping
+from app.models import Product, User, ProductShopMapping, Sale, Shop
 from app.schemas import ProductOut, ProductCostUpdate, ProductMerge
 from app.auth import get_current_user
 
@@ -21,8 +22,40 @@ async def list_products(
         select(Product)
         .where(Product.user_id == current_user.id, Product.canonical_sku.isnot(None))
         .order_by(Product.name)
+        .options(selectinload(Product.mappings))
     )
-    return result.scalars().all()
+    products = result.scalars().all()
+
+    # Продажи по external_sku за всё время (для определения товаров без продаж)
+    sales_result = await db.execute(
+        select(
+            Sale.external_sku,
+            func.sum(Sale.quantity).label("qty"),
+            func.sum(Sale.revenue).label("rev"),
+        )
+        .join(Shop)
+        .where(Shop.user_id == current_user.id, Sale.is_return == False)
+        .group_by(Sale.external_sku)
+    )
+    sales_by_sku: dict = {}
+    for row in sales_result.all():
+        sales_by_sku[row.external_sku] = {
+            "qty": int(row.qty or 0),
+            "rev": Decimal(str(row.rev or 0)),
+        }
+
+    for p in products:
+        total_qty = 0
+        total_rev = Decimal(0)
+        for m in p.mappings:
+            info = sales_by_sku.get(m.external_sku)
+            if info:
+                total_qty += info["qty"]
+                total_rev += info["rev"]
+        p.sales_count = total_qty
+        p.total_revenue = total_rev
+
+    return products
 
 
 @router.put("/products/{sku}/cost", response_model=ProductOut)

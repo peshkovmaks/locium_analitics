@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Multi-Marketplace Dashboard</title>
+  <title>Multi-Markplace Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -12,12 +13,13 @@
       color: #1a1a1a;
       padding: 20px;
     }
-    .dashboard { max-width: 1100px; margin: 0 auto; }
+    .dashboard { max-width: 1200px; margin: 0 auto; }
     .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
-    .kpi-card { padding: 14px 16px; border: 1px solid #e0e0e0; border-radius: 10px; background: #fff; }
+    .kpi-card { padding: 14px 16px; border: 1px solid #e0e0e0; border-radius: 10px; background: #fff; display: flex; flex-direction: column; }
     .kpi-label { font-size: 12px; color: #888; margin-bottom: 4px; }
     .kpi-value { font-size: 26px; font-weight: 500; color: #1a1a1a; font-variant-numeric: tabular-nums; line-height: 1.1; }
     .kpi-wow { font-size: 12px; margin-top: 4px; font-weight: 500; }
+    .kpi-sparkline { height: 40px; margin-top: 8px; flex-shrink: 0; }
     .card { border: 1px solid #e0e0e0; border-radius: 10px; padding: 16px; background: #fff; }
     .card-title { font-size: 14px; font-weight: 500; color: #1a1a1a; margin-bottom: 12px; }
     .grid-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 16px; }
@@ -57,9 +59,16 @@
     .overflow-x { overflow-x: auto; }
     .min-w-700 { min-width: 700px; }
     .min-w-800 { min-width: 800px; }
+    .chart-container { position: relative; height: 200px; width: 100%; }
+    .chart-container-sm { position: relative; height: 140px; width: 100%; }
+    .date-range { display: flex; align-items: center; gap: 8px; }
+    .date-range input { width: 130px; }
+    .btn { padding: 6px 12px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fff; font-size: 14px; cursor: pointer; }
+    .btn-primary { background: #3b82f6; color: #fff; border-color: #3b82f6; }
     @media (max-width: 768px) {
       .kpi-grid { grid-template-columns: repeat(2, 1fr); }
       .grid-2, .grid-1-1 { grid-template-columns: 1fr; }
+      .date-range { flex-wrap: wrap; }
     }
   </style>
 </head>
@@ -70,8 +79,15 @@
         <div style="font-size: 20px; font-weight: 500;">Дашборд</div>
         <div class="text-tertiary" style="font-size: 13px; margin-top: 2px;">20 SKU · WB · Ozon · Яндекс Маркет</div>
       </div>
-      <div style="display: flex; gap: 8px;">
+      <div style="display: flex; gap: 8px; align-items: center;" class="flex-wrap">
         <select id="periodFilter"><option value="today">Сегодня</option><option value="7d">7 дней</option><option value="30d">30 дней</option></select>
+        <span class="text-tertiary" style="font-size: 14px;">или</span>
+        <div class="date-range">
+          <input type="date" id="dateFrom" />
+          <span class="text-tertiary">—</span>
+          <input type="date" id="dateTo" />
+          <button id="applyDate" class="btn btn-primary">Применить</button>
+        </div>
         <select id="mpFilter"><option value="all">Все площадки</option><option value="wb">Wildberries</option><option value="ozon">Ozon</option><option value="ym">Яндекс Маркет</option></select>
       </div>
     </div>
@@ -81,21 +97,25 @@
         <div class="kpi-label">Выручка</div>
         <div class="kpi-value" id="kpi-revenue">₽ 0</div>
         <div class="kpi-wow" id="kpi-revenue-wow">—</div>
+        <div class="kpi-sparkline"><canvas id="sparkRevenue"></canvas></div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Валовая прибыль</div>
         <div class="kpi-value" id="kpi-gross">₽ 0</div>
         <div class="kpi-wow" id="kpi-gross-wow">—</div>
+        <div class="kpi-sparkline"><canvas id="sparkGross"></canvas></div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Чистая прибыль</div>
         <div class="kpi-value" id="kpi-net">₽ 0</div>
         <div class="kpi-wow" id="kpi-net-wow">—</div>
+        <div class="kpi-sparkline"><canvas id="sparkNet"></canvas></div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">ДРР</div>
         <div class="kpi-value" id="kpi-drr">0%</div>
         <div class="kpi-wow" id="kpi-drr-wow">—</div>
+        <div class="kpi-sparkline"><canvas id="sparkDrr"></canvas></div>
       </div>
     </div>
 
@@ -107,17 +127,12 @@
     <div class="grid-2 mb-16">
       <div class="card">
         <div class="card-title">Выручка по площадкам</div>
-        <svg id="lineChart" width="100%" height="200" style="overflow: visible;"></svg>
-        <div style="display: flex; gap: 16px; margin-top: 8px; justify-content: center;">
-          <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #666;"><span style="width: 10px; height: 3px; border-radius: 2px; background: #3b82f6; display: inline-block;"></span> WB</div>
-          <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #666;"><span style="width: 10px; height: 3px; border-radius: 2px; background: #8b5cf6; display: inline-block;"></span> Ozon</div>
-          <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #666;"><span style="width: 10px; height: 3px; border-radius: 2px; background: #ef4444; display: inline-block;"></span> Яндекс Маркет</div>
-        </div>
+        <div class="chart-container"><canvas id="revenueLineChart"></canvas></div>
       </div>
       <div class="card">
         <div class="card-title">Доля выручки</div>
         <div style="display: flex; align-items: center; justify-content: center; position: relative;">
-          <svg id="shareDonut" width="150" height="150" viewBox="0 0 150 150"></svg>
+          <div class="chart-container-sm"><canvas id="shareDonut"></canvas></div>
           <div style="position: absolute; text-align: center;">
             <div class="text-tertiary" style="font-size: 11px;">Всего</div>
             <div id="donut-total" class="font-500 tabular" style="font-size: 16px;">₽ 0</div>
@@ -130,14 +145,14 @@
     <div class="grid-1-1 mb-16">
       <div class="card">
         <div class="card-title">Структура расходов</div>
-        <div style="display: flex; align-items: center; gap: 16px;">
-          <svg id="expenseDonut" width="130" height="130" viewBox="0 0 130 130"></svg>
-          <div id="expense-legend" style="display: flex; flex-direction: column; gap: 5px; flex: 1;"></div>
+        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+          <div style="width: 130px; height: 130px; position: relative;"><canvas id="expenseDonut"></canvas></div>
+          <div id="expense-legend" style="display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 180px;"></div>
         </div>
       </div>
       <div class="card">
         <div class="card-title">ДРР по площадкам</div>
-        <div id="drr-bars" style="display: flex; flex-direction: column; gap: 12px;"></div>
+        <div class="chart-container"><canvas id="drrChart"></canvas></div>
         <div class="mt-8" style="padding-top: 8px; border-top: 1px solid #e0e0e0;">
           <div class="text-tertiary" style="font-size: 12px;">Целевой ДРР: ≤ 10%</div>
         </div>
@@ -229,7 +244,18 @@
     ym: { commission: 0.10, logistics: 0.10, storage: 0.02, ads: 0.04, returns: 0.02, other: 0.01 }
   };
   const EXPENSE_LABELS = { commission: 'Комиссия', logistics: 'Логистика', storage: 'Хранение', ads: 'Реклама', returns: 'Возвраты', other: 'Прочее' };
-  const EXPENSE_COLORS = ['#3b82f6', '#8b5cf6', '#ef4444', '#22c55e', '#9ca3af', '#d1d5db'];
+  const EXPENSE_COLORS = ['#3b82f6', '#8b5cf6', '#ef4444', '#22c55e', '#f59e0b', '#9ca3af'];
+
+  // Chart instances registry for cleanup
+  const charts = {};
+  function destroyChart(id) { if (charts[id]) { charts[id].destroy(); charts[id] = null; } }
+  function createSparklineConfig(data, color) {
+    return {
+      type: 'line',
+      data: { labels: data.map((_, i) => i + 1), datasets: [{ data, borderColor: color, borderWidth: 2, fill: false, tension: 0.4, pointRadius: 0 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false } }, layout: { padding: 2 } }
+    };
+  }
 
   function fm(n) { return '₽ ' + Math.round(n).toLocaleString('ru-RU'); }
   function fp(n) { return n.toFixed(1) + '%'; }
@@ -257,9 +283,26 @@
     ['revenue', 'gross', 'net', 'drr'].forEach(k => {
       const el = document.getElementById('kpi-' + k + '-wow');
       const v = wow[k];
-      el.textContent = (v >= 0 ? '+' : '') + v + '% к прошлой неделе';
+      el.textContent = (v >= 0 ? '+' : '') + v + (k === 'drr' ? ' п.п.' : '%') + ' к прошлой неделе';
       el.style.color = v >= 0 ? COLORS.positive : COLORS.danger;
     });
+  }
+  function renderSparklines(t, mps) {
+    const days = 7;
+    const baseRevenue = t.totalRevenue / days;
+    const baseGross = t.totalGross / days;
+    const baseNet = t.totalNet / days;
+    const baseDrr = t.totalRevenue > 0 ? t.totalAds / t.totalRevenue * 100 : 0;
+    const data = {
+      sparkRevenue: Array.from({length: days}, () => baseRevenue * (0.85 + Math.random() * 0.3)),
+      sparkGross: Array.from({length: days}, () => baseGross * (0.85 + Math.random() * 0.3)),
+      sparkNet: Array.from({length: days}, () => baseNet * (0.85 + Math.random() * 0.3)),
+      sparkDrr: Array.from({length: days}, () => baseDrr * (0.85 + Math.random() * 0.3))
+    };
+    destroyChart('sparkRevenue'); charts.sparkRevenue = new Chart(document.getElementById('sparkRevenue'), createSparklineConfig(data.sparkRevenue, COLORS.positive));
+    destroyChart('sparkGross'); charts.sparkGross = new Chart(document.getElementById('sparkGross'), createSparklineConfig(data.sparkGross, COLORS.positive));
+    destroyChart('sparkNet'); charts.sparkNet = new Chart(document.getElementById('sparkNet'), createSparklineConfig(data.sparkNet, COLORS.positive));
+    destroyChart('sparkDrr'); charts.sparkDrr = new Chart(document.getElementById('sparkDrr'), createSparklineConfig(data.sparkDrr, COLORS.danger));
   }
   function renderAlerts(mpFilter) {
     const c = document.getElementById('alerts-container');
@@ -291,70 +334,92 @@
     return { revenue: r, gross: g, net: n, margin: r > 0 ? n / r * 100 : 0, drr: r > 0 ? a / r * 100 : 0, units: u, ads: a };
   }
   function renderLineChart(mpFilter) {
-    const svg = document.getElementById('lineChart');
     const mps = mpFilter === 'all' ? ['wb', 'ozon', 'ym'] : [mpFilter];
     const days = ['7 авг','8 авг','9 авг','10 авг','11 авг','12 авг','13 авг'];
-    const w = svg.clientWidth || 500, h = 200;
-    const pad = { top: 10, right: 10, bottom: 30, left: 50 };
-    const cw = w - pad.left - pad.right, ch = h - pad.top - pad.bottom;
     const t = calcTotals('all');
     const base = { wb: t.mpData.wb / 7, ozon: t.mpData.ozon / 7, ym: t.mpData.ym / 7 };
-    let maxVal = 0;
-    const series = {};
-    mps.forEach(mp => { series[mp] = days.map(() => base[mp] * (0.85 + Math.random() * 0.3)); maxVal = Math.max(maxVal, ...series[mp]); });
-    maxVal = Math.ceil(maxVal * 1.15);
-    let html = '';
-    for (let i = 0; i <= 4; i++) {
-      const y = pad.top + (ch * i / 4), val = Math.round(maxVal * (1 - i / 4));
-      html += '<line x1="' + pad.left + '" y1="' + y + '" x2="' + (w - pad.right) + '" y2="' + y + '" stroke="#e0e0e0" stroke-width="0.5" stroke-dasharray="2,2"/>';
-      html += '<text x="' + (pad.left - 6) + '" y="' + (y + 4) + '" text-anchor="end" font-size="10" fill="#888">' + (val >= 1000 ? (val / 1000).toFixed(0) + 'K' : val) + '</text>';
-    }
-    days.forEach((d, i) => { if (i % 1 === 0 || i === days.length - 1) { const x = pad.left + (cw * i / (days.length - 1)); html += '<text x="' + x + '" y="' + (h - 8) + '" text-anchor="middle" font-size="10" fill="#888">' + d + '</text>'; } });
-    mps.forEach(mp => {
-      const data = series[mp];
-      let path = '';
-      data.forEach((val, i) => { const x = pad.left + (cw * i / (days.length - 1)); const y = pad.top + ch - (ch * val / maxVal); path += (i === 0 ? 'M' : 'L') + x + ',' + y; });
-      html += '<path d="' + path + '" fill="none" stroke="' + COLORS[mp] + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
-      const lx = pad.left + cw, ly = pad.top + ch - (ch * data[data.length - 1] / maxVal);
-      html += '<circle cx="' + lx + '" cy="' + ly + '" r="4" fill="' + COLORS[mp] + '" stroke="#fff" stroke-width="2"/>';
+    const datasets = mps.map(mp => ({
+      label: MP_NAMES[mp],
+      data: days.map(() => Math.round(base[mp] * (0.85 + Math.random() * 0.3))),
+      borderColor: COLORS[mp],
+      backgroundColor: COLORS[mp],
+      tension: 0.3,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      borderWidth: 2
+    }));
+    destroyChart('revenueLineChart');
+    charts.revenueLineChart = new Chart(document.getElementById('revenueLineChart'), {
+      type: 'line',
+      data: { labels: days, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8, font: { size: 11 } } }, tooltip: { enabled: true } },
+        scales: { y: { beginAtZero: true, grid: { color: '#f0f0f0' }, ticks: { font: { size: 10 }, color: '#888' } }, x: { grid: { display: false }, ticks: { font: { size: 10 }, color: '#888' } } }
+      }
     });
-    svg.innerHTML = html;
   }
-  function renderDonut(id, data, colors) {
-    const svg = document.getElementById(id);
-    const total = data.reduce((a, b) => a + b.value, 0);
-    const r = 55, cx = id === 'expenseDonut' ? 65 : 75, cy = id === 'expenseDonut' ? 65 : 75;
-    const circ = 2 * Math.PI * r;
-    let offset = 0, html = '';
-    data.forEach((item, i) => { const frac = item.value / total; const dash = frac * circ; html += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + colors[i] + '" stroke-width="14" stroke-dasharray="' + dash + ' ' + (circ - dash) + '" stroke-dashoffset="' + (-offset) + '" transform="rotate(-90 ' + cx + ' ' + cy + ')"/>'; offset += dash; });
-    svg.innerHTML = html;
-    return total;
-  }
-  function renderShareLegend(t, mps) {
+  function renderShareDonut(t, mps) {
+    const data = mps.map(mp => t.mpData[mp]);
+    const colors = mps.map(mp => COLORS[mp]);
+    destroyChart('shareDonut');
+    charts.shareDonut = new Chart(document.getElementById('shareDonut'), {
+      type: 'doughnut',
+      data: { labels: mps.map(mp => MP_NAMES[mp]), datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 4 }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false }, tooltip: { enabled: true } } }
+    });
+    document.getElementById('donut-total').textContent = fm(t.totalRevenue);
     const c = document.getElementById('share-legend');
     let html = '';
     mps.forEach(mp => { const val = t.mpData[mp]; const pct = (val / t.totalRevenue * 100).toFixed(1); html += '<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px"><div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:' + COLORS[mp] + '"></span><span style="color:#666">' + MP_NAMES[mp] + '</span></div><div style="display:flex;gap:8px"><span style="color:#1a1a1a;font-weight:500">' + fm(val) + '</span><span style="color:#888;width:36px;text-align:right">' + pct + '%</span></div></div>'; });
     c.innerHTML = html;
-    document.getElementById('donut-total').textContent = fm(t.totalRevenue);
   }
   function renderExpenses(t, mps) {
     const agg = {};
     PRODUCTS.forEach(p => { mps.forEach(mp => { const rev = p[mp].price * p[mp].sales; const r = EXPENSE_RATIOS[mp]; Object.entries(r).forEach(([k, v]) => { agg[k] = (agg[k] || 0) + rev * v; }); }); });
-    const items = Object.entries(agg).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ value: v }));
-    renderDonut('expenseDonut', items, EXPENSE_COLORS.slice(0, items.length));
+    const sorted = Object.entries(agg).sort((a, b) => b[1] - a[1]);
+    const labels = sorted.map(([k]) => EXPENSE_LABELS[k]);
+    const data = sorted.map(([, v]) => v);
+    const colors = sorted.map((_, i) => EXPENSE_COLORS[i % EXPENSE_COLORS.length]);
+    destroyChart('expenseDonut');
+    charts.expenseDonut = new Chart(document.getElementById('expenseDonut'), {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 4 }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '55%', plugins: { legend: { display: false }, tooltip: { enabled: true } } }
+    });
     const c = document.getElementById('expense-legend');
     let html = '';
-    Object.entries(agg).sort((a, b) => b[1] - a[1]).forEach(([key, val], i) => { const pct = (val / t.totalExpenses * 100).toFixed(1); html += '<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px"><div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:' + EXPENSE_COLORS[i] + '"></span><span style="color:#666">' + EXPENSE_LABELS[key] + '</span></div><div style="display:flex;gap:8px"><span style="color:#1a1a1a;font-weight:500">' + fm(val) + '</span><span style="color:#888;width:36px;text-align:right">' + pct + '%</span></div></div>'; });
+    sorted.forEach(([key, val], i) => { const pct = (val / t.totalExpenses * 100).toFixed(1); html += '<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px"><div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:' + colors[i] + '"></span><span style="color:#666">' + EXPENSE_LABELS[key] + '</span></div><div style="display:flex;gap:8px"><span style="color:#1a1a1a;font-weight:500">' + fm(val) + '</span><span style="color:#888;width:36px;text-align:right">' + pct + '%</span></div></div>'; });
     c.innerHTML = html;
   }
-  function renderDRR(t, mps) {
-    const c = document.getElementById('drr-bars');
-    const ma = { wb: 0, ozon: 0, ym: 0 }, mr = { wb: 0, ozon: 0, ym: 0 };
+  function renderDRR(mps) {
+    const mr = { wb: 0, ozon: 0, ym: 0 }, ma = { wb: 0, ozon: 0, ym: 0 };
     PRODUCTS.forEach(p => { mps.forEach(mp => { const rev = p[mp].price * p[mp].sales; mr[mp] += rev; ma[mp] += rev * EXPENSE_RATIOS[mp].ads; }); });
-    const maxDrr = Math.max(...mps.map(mp => mr[mp] > 0 ? ma[mp] / mr[mp] * 100 : 0), 15);
-    let html = '';
-    mps.forEach(mp => { const drr = mr[mp] > 0 ? ma[mp] / mr[mp] * 100 : 0; const w = (drr / maxDrr * 100); const ok = drr <= 10; html += '<div><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:#666">' + MP_NAMES[mp] + '</span><span style="color:' + (ok ? COLORS.positive : COLORS.danger) + ';font-weight:500">' + fp(drr) + '</span></div><div class="bar-bg"><div class="bar-fill" style="width:' + w + '%;background:' + COLORS[mp] + '"></div></div></div>'; });
-    c.innerHTML = html;
+    const labels = mps.map(mp => MP_NAMES[mp]);
+    const data = mps.map(mp => mr[mp] > 0 ? +(ma[mp] / mr[mp] * 100).toFixed(2) : 0);
+    const colors = mps.map(mp => COLORS[mp]);
+    const targetLine = {
+      type: 'line',
+      label: 'Целевой ДРР',
+      data: mps.map(() => 10),
+      borderColor: '#9ca3af',
+      borderWidth: 2,
+      borderDash: [6, 6],
+      pointRadius: 0,
+      fill: false
+    };
+    destroyChart('drrChart');
+    charts.drrChart = new Chart(document.getElementById('drrChart'), {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'ДРР, %', data, backgroundColor: colors, borderRadius: 4, barThickness: 18 }, targetLine] },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: true } },
+        scales: { x: { max: 15, grid: { color: '#f0f0f0' }, ticks: { font: { size: 10 }, color: '#888' } }, y: { grid: { display: false }, ticks: { font: { size: 12 }, color: '#666' } } }
+      }
+    });
   }
   function renderUnitTable(mpFilter) {
     const tbody = document.getElementById('unit-table');
@@ -453,6 +518,15 @@
       '<td class="text-right">' + fp(td) + '</td></tr>';
     tbody.innerHTML = html;
   }
+  function updateDateInputs(period) {
+    const to = new Date();
+    const from = new Date();
+    if (period === 'today') from.setDate(to.getDate());
+    else if (period === '7d') from.setDate(to.getDate() - 6);
+    else if (period === '30d') from.setDate(to.getDate() - 29);
+    document.getElementById('dateFrom').value = from.toISOString().split('T')[0];
+    document.getElementById('dateTo').value = to.toISOString().split('T')[0];
+  }
   function update() {
     const mpFilter = document.getElementById('mpFilter').value;
     const search = document.getElementById('productSearch').value;
@@ -460,22 +534,23 @@
     const t = calcTotals(mpFilter);
     const mps = mpFilter === 'all' ? ['wb', 'ozon', 'ym'] : [mpFilter];
     renderKPI(t);
+    renderSparklines(t, mps);
     renderAlerts(mpFilter);
     renderLineChart(mpFilter);
-    renderDonut('shareDonut', mps.map(mp => ({ value: t.mpData[mp] })), mps.map(mp => COLORS[mp]));
-    renderShareLegend(t, mps);
+    renderShareDonut(t, mps);
     renderExpenses(t, mps);
-    renderDRR(t, mps);
+    renderDRR(mps);
     renderUnitTable(mpFilter);
     renderProductsTable(mpFilter, search, sortBy);
     renderComparisonTable(t, mps);
   }
-  document.getElementById('periodFilter').addEventListener('change', update);
+  document.getElementById('periodFilter').addEventListener('change', e => { updateDateInputs(e.target.value); update(); });
   document.getElementById('mpFilter').addEventListener('change', update);
   document.getElementById('productSearch').addEventListener('input', update);
   document.getElementById('productSort').addEventListener('change', update);
+  document.getElementById('applyDate').addEventListener('click', update);
+  updateDateInputs('today');
   update();
-  window.addEventListener('resize', () => renderLineChart(document.getElementById('mpFilter').value));
 })();
 </script>
 </body>

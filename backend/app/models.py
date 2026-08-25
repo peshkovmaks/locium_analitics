@@ -12,6 +12,7 @@ from sqlalchemy import (
     Text,
     JSON,
     UniqueConstraint,
+    Index,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
@@ -246,3 +247,30 @@ class ProductShopMapping(Base):
 
     product = relationship("Product", back_populates="mappings")
     shop = relationship("Shop")
+
+
+class FinanceTransaction(Base):
+    __tablename__ = "finance_transactions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shop_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("shops.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    marketplace = Column(Enum(Marketplace), nullable=False, index=True)
+    operation_date = Column(DateTime, nullable=False, index=True)
+    posting_number = Column(String(255), nullable=True, index=True)
+    external_sku = Column(String(255), nullable=True, index=True)
+    operation_type = Column(String(255), nullable=True)
+    operation_name = Column(String(255), nullable=True)
+    category = Column(String(50), nullable=False)
+    amount = Column(Numeric(12, 2), default=0)
+    raw_data = Column(JSONB, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_finance_transactions_shop_date_cat", "shop_id", "operation_date", "category"),
+        Index("ix_finance_transactions_shop_sku_date", "shop_id", "external_sku", "operation_date"),
+    )

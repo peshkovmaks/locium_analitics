@@ -387,12 +387,13 @@ class OzonAdapter(MarketplaceAdapter):
             return None
 
     async def get_finance_report(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
-        """Fetch transactions from Ozon and group expenses by posting number.
+        """Fetch transactions from Ozon and return them as normalized expense rows.
 
         Ozon /v3/finance/transaction/list returns accruals that match the
-        Finance → Accruals section in the seller dashboard. We map each
-        operation to an expense category and later distribute the amounts
-        across the SKU rows of the same posting number.
+        Finance → Accruals section in the seller dashboard. Each returned row
+        represents a single expense category for one operation. The operation date
+        is preserved so the dashboard can sum expenses by the date Ozon charged
+        them, not by the date of the original sale.
         """
         page = 1
         page_size = 1000
@@ -425,8 +426,6 @@ class OzonAdapter(MarketplaceAdapter):
 
         logger.info("Ozon transactions fetched: %d operations", len(operations))
 
-        expenses_by_posting: Dict[str, Dict[str, Decimal]] = {}
-
         def service_amount_by_name(services: List[Dict[str, Any]], *keywords: str) -> Decimal:
             total = Decimal("0")
             for service in services or []:
@@ -436,65 +435,46 @@ class OzonAdapter(MarketplaceAdapter):
                     total += abs(price)
             return total
 
-        for op in operations:
+        def category_amounts_for_op(op: Dict[str, Any]) -> Dict[str, Decimal]:
             op_type = (op.get("operation_type") or "").lower()
             name = (op.get("operation_type_name") or "").lower()
             amount = Decimal(str(op.get("amount", 0) or 0))
-            posting = op.get("posting") or {}
-            posting_number = str(posting.get("posting_number", ""))
             services = op.get("services") or []
+            amounts: Dict[str, Decimal] = {}
 
-            # Delivery to customer: commission and logistics are broken out
-            # in sale_commission and services. ``amount`` itself is usually
-            # positive (net payout) and must not be treated as an expense.
             if op_type == "operationagentdeliveredtocustomer":
-                if not posting_number:
-                    continue
-                bucket = expenses_by_posting.setdefault(posting_number, {
-                    "commission": Decimal("0"),
-                    "logistics": Decimal("0"),
-                    "storage": Decimal("0"),
-                    "advertising": Decimal("0"),
-                    "returns": Decimal("0"),
-                    "insurance": Decimal("0"),
-                    "acquiring": Decimal("0"),
-                    "other": Decimal("0"),
-                })
-                bucket["commission"] += abs(Decimal(str(op.get("sale_commission", 0) or 0)))
-                bucket["logistics"] += service_amount_by_name(
+                commission = abs(Decimal(str(op.get("sale_commission", 0) or 0)))
+                logistics = service_amount_by_name(
                     services,
                     "logistic", "lastmile", "handoverplace", "deliverytohandover",
                 )
-                bucket["returns"] += service_amount_by_name(services, "return")
-                bucket["storage"] += service_amount_by_name(services, "storage")
-                bucket["advertising"] += service_amount_by_name(services, "advert", "marketing")
-                bucket["insurance"] += service_amount_by_name(services, "insurance")
-                bucket["acquiring"] += service_amount_by_name(services, "acquiring")
-                continue
+                returns = service_amount_by_name(services, "return")
+                storage = service_amount_by_name(services, "storage")
+                advertising = service_amount_by_name(services, "advert", "marketing")
+                insurance = service_amount_by_name(services, "insurance")
+                acquiring = service_amount_by_name(services, "acquiring")
+                if commission:
+                    amounts["commission"] = commission
+                if logistics:
+                    amounts["logistics"] = logistics
+                if returns:
+                    amounts["returns"] = returns
+                if storage:
+                    amounts["storage"] = storage
+                if advertising:
+                    amounts["advertising"] = advertising
+                if insurance:
+                    amounts["insurance"] = insurance
+                if acquiring:
+                    amounts["acquiring"] = acquiring
+                return amounts
 
-            # Skip accruals that are not expenses (positive amount, no posting).
             if amount >= 0:
-                continue
+                return {}
 
-            # For postings without a number, we currently cannot reliably map
-            # SKU-level charges (e.g. insurance) to our sales rows, so skip them.
-            if not posting_number:
-                continue
-
-            bucket = expenses_by_posting.setdefault(posting_number, {
-                "commission": Decimal("0"),
-                "logistics": Decimal("0"),
-                "storage": Decimal("0"),
-                "advertising": Decimal("0"),
-                "returns": Decimal("0"),
-                "insurance": Decimal("0"),
-                "acquiring": Decimal("0"),
-                "other": Decimal("0"),
-            })
-
-            lowered_name = name
-            if op_type in ("clientreturnagentoperation", "operationreturngoodsfbsofrms") or "return" in lowered_name:
-                bucket["returns"] += abs(amount)
+            category = "other"
+            if op_type in ("clientreturnagentoperation", "operationreturngoodsfbsofrms") or "return" in name:
+                category = "returns"
             elif (
                 op_type
                 in (
@@ -502,24 +482,52 @@ class OzonAdapter(MarketplaceAdapter):
                     "operationmarketplacecostperclick",
                     "operationpromotionwithcostperorder",
                 )
-                or "marketing" in lowered_name
-                or "реклама" in lowered_name
-                or "оплата за клик" in lowered_name
-                or "продвижение с оплатой за заказ" in lowered_name
+                or "marketing" in name
+                or "реклама" in name
+                or "оплата за клик" in name
+                or "продвижение с оплатой за заказ" in name
             ):
-                bucket["advertising"] += abs(amount)
-            elif "insurance" in lowered_name:
-                bucket["insurance"] += abs(amount)
-            elif "acquiring" in lowered_name or "эквайринг" in lowered_name:
-                bucket["acquiring"] += abs(amount)
-            else:
-                # Compensations and any other charges.
-                bucket["other"] += abs(amount)
+                category = "advertising"
+            elif "insurance" in name:
+                category = "insurance"
+            elif "acquiring" in name or "эквайринг" in name:
+                category = "acquiring"
 
-        return [
-            {
-                "external_id": posting_number,
-                **amounts,
-            }
-            for posting_number, amounts in expenses_by_posting.items()
-        ]
+            amounts[category] = abs(amount)
+            return amounts
+
+        transactions: List[Dict[str, Any]] = []
+        for op in operations:
+            posting = op.get("posting") or {}
+            posting_number = str(posting.get("posting_number", ""))
+            op_type = op.get("operation_type", "")
+            op_name = op.get("operation_type_name", "")
+
+            if op_type.lower() != "operationagentdeliveredtocustomer":
+                # For non-delivery operations we cannot reliably map SKU-level
+                # charges to a posting, so skip them when there is no posting number.
+                if not posting_number:
+                    continue
+
+            amounts = category_amounts_for_op(op)
+            if not amounts:
+                continue
+
+            operation_date = self._parse_date(op.get("operation_date", ""), datetime.utcnow())
+            operation_date = operation_date.replace(tzinfo=None) if operation_date.tzinfo else operation_date
+
+            for category, amount in amounts.items():
+                if amount <= 0:
+                    continue
+                transactions.append({
+                    "operation_date": operation_date,
+                    "posting_number": posting_number or None,
+                    "external_sku": None,
+                    "operation_type": op_type,
+                    "operation_name": op_name,
+                    "category": category,
+                    "amount": amount,
+                    "items": op.get("items") or [],
+                })
+
+        return transactions

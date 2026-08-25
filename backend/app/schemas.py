@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List
+from typing import Optional, List, Dict
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
 from app.models import UserRole, Marketplace
 
@@ -70,6 +70,8 @@ class ProductOut(BaseModel):
     weight_kg: Optional[Decimal]
     category: Optional[str]
     created_at: datetime
+    sales_count: int = 0
+    total_revenue: Decimal = Decimal("0")
 
     class Config:
         from_attributes = True
@@ -142,6 +144,7 @@ class MarketplaceKPI(BaseModel):
     marketplace: str
     revenue: Decimal
     actual_revenue: Decimal
+    expenses: Decimal
     gross_profit: Decimal
     net_profit: Decimal
     drr: Decimal
@@ -213,9 +216,42 @@ class AlertItem(BaseModel):
     text: str
 
 
+class DailyTrendRow(BaseModel):
+    date: date
+    wb_revenue: Decimal
+    ozon_revenue: Decimal
+    ym_revenue: Decimal
+
+
+class OrderStats(BaseModel):
+    orders_count: int
+    average_check: Decimal
+    average_profit_per_order: Decimal
+    profit_per_item: Decimal
+    returns_count: int = 0
+    return_rate: Decimal = Decimal("0")
+    avg_items_per_order: Decimal = Decimal("0")
+    orders_count_wow: float = 0.0
+    average_check_wow: float = 0.0
+    average_profit_per_order_wow: float = 0.0
+    profit_per_item_wow: float = 0.0
+    returns_count_wow: float = 0.0
+    return_rate_wow: float = 0.0
+    avg_items_per_order_wow: float = 0.0
+    orders_count_trend: List[int] = []
+    average_check_trend: List[float] = []
+    average_profit_per_order_trend: List[float] = []
+    profit_per_item_trend: List[float] = []
+    returns_count_trend: List[int] = []
+    avg_items_per_order_trend: List[float] = []
+
+
 class DashboardData(BaseModel):
     kpi: KPIData
+    order_stats: OrderStats
     alerts: List[AlertItem]
     marketplace_comparison: List[MarketplaceComparison]
     unit_economics: List[UnitEconomicsRow]
     products: List[ProductDashboardRow]
+    daily_trend: List[DailyTrendRow] = []
+    expense_structure: Dict[str, Decimal] = {}

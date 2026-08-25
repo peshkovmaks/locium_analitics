@@ -32,9 +32,9 @@
    - Celery (фоновый сбор данных каждые 4 часа)
 
 2. Адаптеры для 3 площадок (Adapter Pattern):
-   - WB API (статистика, реклама, остатки)
-   - Ozon Seller API
-   - Яндекс Маркет Partner API (OAuth 2.0)
+   - [x] WB API (статистика, реклама, остатки, финансы)
+   - [x] Ozon Seller API
+   - [~] Яндекс Маркет Partner API (заказы/остатки работают; детальные расходы уточняются)
 
 3. Модели БД:
    - users (id, email, password_hash, role: admin/viewer)
