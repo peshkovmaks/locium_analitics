@@ -246,12 +246,15 @@ class TestGetFinanceReport:
                         "retailAmount": 5000.0,
                         "retailPrice": 2500.0,
                         "ppvzSalesCommission": 500.0,
+                        "ppvzReward": 25.0,
                         "deliveryService": 150.0,
+                        "rebillLogisticCost": 10.0,
                         "paidStorage": 20.0,
                         "returnAmount": 0.0,
                         "acquiringFee": 30.0,
                         "deduction": 10.0,
                         "penalty": 5.0,
+                        "paidAcceptance": 15.0,
                     }
                 ])
             ],
@@ -267,11 +270,14 @@ class TestGetFinanceReport:
         # srid should be normalized to the hex segment.
         assert row["external_id"] == "i417f68ba86af0fd75a9e865c8622d699"
         assert row["revenue"] == Decimal("5000.0")
-        assert row["commission"] == Decimal("500.0")
-        assert row["logistics"] == Decimal("150.0")
+        # commission includes ppvzReward
+        assert row["commission"] == Decimal("525.0")
+        # logistics is deliveryService minus rebillLogisticCost
+        assert row["logistics"] == Decimal("140.0")
         assert row["storage"] == Decimal("20.0")
         assert row["acquiring"] == Decimal("30.0")
-        assert row["other"] == Decimal("15.0")  # deduction + penalty
+        # other is deduction + penalty + paidAcceptance
+        assert row["other"] == Decimal("30.0")
 
     async def test_return_sign(self, adapter):
         with _patch_client(

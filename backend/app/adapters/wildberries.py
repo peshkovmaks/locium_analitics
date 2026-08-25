@@ -540,6 +540,25 @@ class WildberriesAdapter(MarketplaceAdapter):
             if acquiring == 0:
                 acquiring = Decimal(str(self._finance_value(item, "acquiring_amount") or 0))
 
+            # ppvzReward is WB's additional reward/charge on sales; treat it as
+            # part of the marketplace commission.
+            commission = Decimal(str(self._finance_value(item, "ppvzSalesCommission") or 0))
+            commission += Decimal(str(self._finance_value(item, "ppvzReward") or 0))
+
+            # Delivery cost net of WB logistics reimbursements (rebillLogisticCost).
+            logistics = Decimal(str(self._finance_value(item, "deliveryService", "deliveryRub") or 0))
+            logistics -= Decimal(str(self._finance_value(item, "rebillLogisticCost") or 0))
+
+            # Storage supports both current (paidStorage) and legacy (storageFee) keys.
+            storage = Decimal(str(self._finance_value(item, "paidStorage", "storageFee") or 0))
+
+            # Other deductions: penalties, generic deductions and paid acceptance.
+            other = (
+                Decimal(str(self._finance_value(item, "deduction") or 0))
+                + Decimal(str(self._finance_value(item, "penalty") or 0))
+                + Decimal(str(self._finance_value(item, "paidAcceptance", "acceptance") or 0))
+            )
+
             external_sku = str(
                 self._finance_value(item, "vendorCode")
                 or self._finance_value(item, "sa_name")
@@ -554,13 +573,13 @@ class WildberriesAdapter(MarketplaceAdapter):
                 "quantity": quantity,
                 "price": Decimal(str(self._finance_value(item, "retailPrice") or 0)),
                 "revenue": revenue,
-                "commission": Decimal(str(self._finance_value(item, "ppvzSalesCommission") or 0)),
-                "logistics": Decimal(str(self._finance_value(item, "deliveryService") or 0)),
-                "storage": Decimal(str(self._finance_value(item, "paidStorage") or 0)),
+                "commission": commission,
+                "logistics": logistics,
+                "storage": storage,
                 "returns": Decimal(str(self._finance_value(item, "returnAmount") or 0)),
                 "insurance": Decimal("0"),
                 "acquiring": acquiring,
-                "other": Decimal(str(self._finance_value(item, "deduction") or 0)) + Decimal(str(self._finance_value(item, "penalty") or 0)),
+                "other": other,
             })
         return reports
 
