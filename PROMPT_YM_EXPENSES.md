@@ -1,56 +1,94 @@
 # Промпт: доделать расходы Яндекс Маркета
 
-## Что уже сделано
+## Что уже сделано (31.08.2026)
 
-1. Исправлен баг фоновой синхронизации: `backend/app/services/sync_service.py` теперь расшифровывает `shop.credentials` через `decrypt_dict` перед передачей в `AdapterFactory.create`.
-2. Заказы ЯМ синхронизируются: 119 заказов за 30 дней сохранены в БД.
-3. Выручка ЯМ на дашборде за 01.08–24.08 = 77 007 ₽. В БД сумма `Sale.revenue` за тот же период = 46 541 ₽, но `max(price, customer_price) * quantity` = ~79 965 ₽. Дашборд считает по `customer_price`, что ближе к ЛК ЯМ.
-4. Проверен `/v2/reports/united-marketplace-services/generate` — возвращает `420 Enhance your Calm` (rate limit). Вероятно, endpoint deprecated или имеет жёсткий дневной лимит.
-5. Проверен `/v2/reports/united-netting/generate` — работает, но это отчёт о платежах, а не детальных расходов. За 30 дней там только 1 строка удержания услуг на −28 990 ₽, без разбивки по SKU/категориям.
-6. `stats/orders` отдаёт `payments: []` и `commissions: []` — данные появляются с задержкой.
+1. **Заказы ЯМ синхронизированы за 210 дней** (01.02.2026 – 31.08.2026) через `backend/resync_ym.py 210`.
+   - В БД: **1097 уникальных заказов**, из них **1042 non-return**.
+   - В ЛК ЯМ: **1042 доставленных заказа** — совпадает.
+2. **Исправлена пагинация заказов** в `backend/app/adapters/yandex_market.py::_fetch_orders`:
+   - Используются параметры `fromDate`/`toDate` (вместо `dateFrom`/`dateTo`).
+   - `limit=50` (API игнорирует `limit>50`).
+3. **Исправлен расчёт выручки и субсидий**:
+   - `price` / `revenue` = `buyerPrice * quantity` (цена после скидок, которую заплатил покупатель).
+   - `marketplace_discount` = `order.subsidies`, распределённые пропорционально `buyerPrice * quantity` по товарам.
+   - `actual revenue` = `revenue + marketplace_discount`.
+4. **Сверка по заказам и выручке**:
+   - `revenue` (buyer paid) non-return = **988 838 ₽**.
+   - `marketplace_discount` non-return = **600 934 ₽**.
+   - `actual revenue` non-return = **1 589 772 ₽**.
+   - В ЛК: **Выручка = 1 558 025 ₽**, **Доставленные заказы = 1042**.
+   - Расхождение по выручке ~**2 %** (~31 747 ₽). Приемлемо, но можно ещё уточнить.
+5. **Chunking finance report** реализован в `backend/app/adapters/yandex_market.py::get_finance_report`:
+   - Период делится на чанки по 28 дней.
+   - Между чанками `asyncio.sleep(120)` из-за rate limit.
+6. **Вспомогательные скрипты**:
+   - `backend/resync_ym.py` — ручной resync заказов (без finance, чтобы не ждать rate limit).
+   - `backend/fetch_ym_finance.py` — выгрузка finance report за N дней и сохранение расходов в БД.
 
 ## Что нужно сделать
 
-### 1. Найти правильный источник расходов ЯМ
-- Определить, какой endpoint/API-метод Яндекс Маркета возвращает детальные расходы (комиссия, доставка, реклама, хранение, страхование, эквайринг) по заказам/SKU.
-- Возможные направления:
-  - Подождать и снова попробовать `/v2/reports/united-marketplace-services/generate` (maybe retry с большим интервалом, 1 попытка в сутки).
-  - Использовать `/v2/reports/united-netting/generate` с детальным парсингом — но он не даёт категорий.
-  - Найти другие endpoint'ы: `/v2/campaigns/{campaignId}/orders/{orderId}/...`, `/v2/businesses/{businessId}/...`, отчёты по актам.
-  - Попросить пользователя прислать CSV/Excel-выгрузку расходов из ЛК ЯМ, чтобы понять структуру и искомые цифры.
+### 1. Дождаться и проверить finance report
+- Запустить `backend/fetch_ym_finance.py 210` и дать ему **5 часов** (API ЯМ генерирует каждый чанк медленно, ~10+ минут на чанк + 120 сек между ними).
+- После завершения проверить суммы:
+  ```bash
+  cd backend
+  arch -x86_64 .venv/bin/python - <<'PY'
+  import asyncio
+  from sqlalchemy import text
+  from app.database import get_async_session_maker
+  shop_id = 'b87e8b29-f280-46f2-b25d-9055e9325401'
+  async def check():
+      async with get_async_session_maker()() as db:
+          total = (await db.execute(text(
+              "select sum(commission), sum(logistics), sum(storage), sum(advertising), "
+              "sum(insurance), sum(acquiring), sum(other) from sales where shop_id=:shop_id"
+          ), {"shop_id": shop_id})).fetchone()
+          print(total)
+  asyncio.run(check())
+  PY
+  ```
+- Сверить с ЛК:
+  - **Стоимость всех услуг Маркета без продвижения** = 670 585 ₽.
+  - **Стоимость услуг продвижения** = 40 417 ₽.
+- Если суммы не сходятся — править категоризацию в `backend/app/adapters/yandex_market.py::_download_and_parse_ym_report` (sheet_categories / service mapping).
 
-### 2. Реализовать сохранение расходов ЯМ
-- Добавить парсинг нужного отчёта в `backend/app/adapters/yandex_market.py::get_finance_report`.
-- Распределять расходы по заказам/SKU либо сохранять как `FinanceTransaction` (как для Ozon), чтобы dashboard брал их по дате операции.
-- Учесть marketplace-скидки: `marketplace_discount` уже добавлен в `Sale` из `subsidies`.
+### 2. Уточнить revenue / marketplace_discount
+- Возможные причины расхождения в ~31 747 ₽:
+  - `marketplace_discount` берёт `order.subsidies`, но в ЛК «Выручка» может включать не все субсидии (например, исключается YANDEX_CASHBACK или delivery subsidy).
+  - Даты: мы фильтруем по `creationDate`, ЛК может считать по дате доставки.
+  - 2 заказа расходятся по статусу (наши 1042 non-return vs ЛК 1042 delivered).
+- Проверить, что `actual revenue` = `revenue + marketplace_discount` даёт 1 558 025 ₽. Если нет — попробовать:
+  - `marketplace_discount` только item-level `subsidies`.
+  - Исключить `YANDEX_CASHBACK` из `marketplace_discount`.
+  - Использовать `itemsTotal` вместо суммы `buyerPrice * quantity` для revenue.
 
-### 3. Сверить с ЛК ЯМ
-- После получения расходов пересинхронизировать ЯМ за 01.08–24.08 (или за период, который даст пользователь).
-- Сравнить:
-  - Выручка (по цене покупателя / продавца — уточнить эталон).
-  - Валовая прибыль = выручка − расходы.
-  - Чистая прибыль = валовая − себестоимость.
-  - ДРР.
-- Добиться расхождения не более нескольких процентов/погрешности.
+### 3. Сверить дашборд с ЛК
+- После загрузки расходов открыть http://localhost:5173/static/ (если front не запущен — `cd frontend && npm run dev`).
+- Проверить период «210 дней» (или 01.02.2026 – 31.08.2026) для ЯМ:
+  - Выручка ≈ 1 558 025 ₽.
+  - Заказы = 1042.
+  - Средний чек ≈ 1 495 ₽.
+  - Валовая прибыль, ДРР, маржа.
+- Если нужно — поправить `backend/app/routers/dashboard.py` для ЯМ (`_gross_revenue`, `_actual_revenue`, expense aggregation).
 
-### 4. Доработать дашборд при необходимости
-- Если в ЛК ЯМ «Выручка» = цена покупателя, оставить текущий расчёт `_gross_revenue` через `max(price, customer_price)`.
-- Если «Выручка» = цена продавца/к переводу, изменить на `min(price, customer_price)` или `revenue`.
-
-## Текущие блокеры
-- API ЯМ отдаёт `420` на `/v2/reports/united-marketplace-services/generate`.
-- `stats/orders` не содержит `payments`/`commissions` за август.
-- Нужен либо другой endpoint, либо доступ к ЛК/выгрузке для понимания структуры расходов.
-
-## Полезные файлы
-- `backend/app/adapters/yandex_market.py` — адаптер ЯМ.
-- `backend/app/services/sync_service.py` — синхронизация.
-- `backend/app/routers/dashboard.py` — расчёт дашборда.
-- `backend/app/models.py` — модели `Sale`, `FinanceTransaction`.
-- `backend/test_ym_netting.py` — пример запроса к `/v2/reports/united-netting/generate` (времянка, можно удалить).
+### 4. Закоммитить и запушить
+- `git add backend/app/adapters/yandex_market.py backend/app/services/sync_service.py backend/fetch_ym_finance.py backend/resync_ym.py PROMPT_YM_EXPENSES.md`
+- `git commit` и `git push`.
 
 ## Ближайший шаг при возобновлении
-Попробовать получить расходы ЯМ одним из способов:
-1. Подождать 12–24 часа и сделать 1 запрос к `/v2/reports/united-marketplace-services/generate`.
-2. Попросить у пользователя CSV/Excel-выгрузку расходов из ЛК ЯМ за 01.08–24.08.
-3. Изучить документацию ЯМ на предмет актуального endpoint'а для детальных начислений.
+
+1. **Запустить finance report**:
+   ```bash
+   cd /Users/peshkov/Yandex.Disk.localized/Development/locium_analitics/backend
+   arch -x86_64 .venv/bin/python fetch_ym_finance.py 210 > /tmp/ym_finance.log 2>&1
+   ```
+2. **Ждать завершения** (следить за `/tmp/ym_finance.log`).
+3. **Проверить расходы в БД и сверить с ЛК**.
+
+## Полезные файлы
+
+- `backend/app/adapters/yandex_market.py` — адаптер ЯМ (заказы + finance report).
+- `backend/app/services/sync_service.py` — синхронизация, `_update_finance_data`.
+- `backend/app/routers/dashboard.py` — расчёт дашборда.
+- `backend/fetch_ym_finance.py` — скрипт выгрузки расходов.
+- `backend/resync_ym.py` — скрипт выгрузки заказов.
