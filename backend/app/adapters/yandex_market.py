@@ -23,7 +23,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
 from urllib.parse import urlparse
@@ -99,78 +99,143 @@ class YandexMarketAdapter(MarketplaceAdapter):
             response.raise_for_status()
             return response.json()
 
-    async def get_sales(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
-        """Get order stats from Yandex Market.
+    async def _get_with_delay(self, endpoint: str, params: Optional[Dict] = None) -> Any:
+        """Make GET request to YM API with a small delay to avoid rate limits."""
+        await asyncio.sleep(0.6)
+        return await self._get(endpoint, params)
 
-        Uses /v2/campaigns/{campaignId}/stats/orders
+    async def _fetch_orders(
+        self,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> List[Dict[str, Any]]:
+        """Fetch all orders from Yandex Market.
+
+        Uses GET /v2/campaigns/{campaignId}/orders. The endpoint has a hard
+        limit of 30 days per request and returns at most 50 orders per page,
+        so we split the range into 30-day chunks and paginate within each chunk.
         """
-        data = await self._post(
-            f"/v2/campaigns/{self.campaign_id}/stats/orders",
-            {
-                "dateFrom": date_from.strftime("%Y-%m-%d"),
-                "dateTo": date_to.strftime("%Y-%m-%d"),
-                "limit": 200,
-            },
-        )
+        all_orders: List[Dict[str, Any]] = []
+
+        chunk_start = date_from
+        while chunk_start < date_to:
+            chunk_end = min(chunk_start + timedelta(days=30), date_to)
+            page_token = None
+            while True:
+                params: Dict[str, Any] = {
+                    "fromDate": chunk_start.strftime("%Y-%m-%d"),
+                    "toDate": chunk_end.strftime("%Y-%m-%d"),
+                    "limit": 50,
+                }
+                if page_token:
+                    params["pageToken"] = page_token
+
+                data = await self._get_with_delay(
+                    f"/v2/campaigns/{self.campaign_id}/orders",
+                    params,
+                )
+                orders = data if isinstance(data, list) else data.get("orders", [])
+                all_orders.extend(orders)
+
+                paging = data.get("paging") if isinstance(data, dict) else None
+                page_token = paging.get("nextPageToken") if paging else None
+                if not page_token:
+                    break
+
+            chunk_start = chunk_end
+
+        return all_orders
+
+    @staticmethod
+    def _parse_ym_datetime(value: str) -> datetime:
+        """Parse Yandex Market datetime strings like '30-08-2026 19:22:59'."""
+        value = value or ""
+        for fmt in ("%d-%m-%Y %H:%M:%S", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+        return datetime.utcnow()
+
+    async def get_sales(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
+        """Get orders from Yandex Market.
+
+        Uses GET /v2/campaigns/{campaignId}/orders, which returns full order
+        details including buyer price, seller price, subsidies and discounts.
+        """
+        orders = await self._fetch_orders(date_from, date_to)
 
         sales = []
-        for item in data.get("result", {}).get("orders", []):
-            order_status = item.get("status", "").upper()
-            order_date = item.get("creationDate", "")
-            try:
-                sale_date = datetime.fromisoformat(order_date.replace("Z", "+00:00"))
-            except (ValueError, AttributeError):
-                sale_date = datetime.utcnow()
+        for order in orders:
+            order_status = (order.get("status") or "").upper()
+            substatus = (order.get("substatus") or "").upper()
+            order_date = self._parse_ym_datetime(order.get("creationDate", ""))
+            order_id = str(order.get("id", ""))
 
-            order_id = str(item.get("id", ""))
-            for product in item.get("items", []):
-                shop_sku = str(product.get("shopSku", ""))
-                prices = product.get("prices", []) or []
-                buyer_price = next(
-                    (p.get("costPerItem") for p in prices if p.get("type") == "BUYER"), None
-                )
-                marketplace_price = next(
-                    (p.get("costPerItem") for p in prices if p.get("type") == "MARKETPLACE"), None
-                )
+            is_return = order_status in (
+                "CANCELLED",
+                "CANCELLED_BY_CUSTOMER",
+                "RETURNED",
+                "PARTIALLY_RETURNED",
+            ) or substatus in ("CANCELLED", "RETURNED")
+
+            for product in order.get("items", []):
+                shop_sku = str(product.get("offerId") or product.get("shopSku") or "")
                 quantity = int(product.get("count", 1) or 1)
 
-                # price = what the seller receives (marketplace price)
-                # customer_price = what the buyer actually paid (buyer price)
-                price_value = Decimal(str(marketplace_price or buyer_price or 0))
-                customer_price_value = Decimal(str(buyer_price or marketplace_price or 0))
+                # buyerPrice = what the buyer paid after discounts.
+                # price = the seller's price before subsidies, which for Yandex
+                #   Market equals buyerPrice (subsidies are compensated on top).
+                # buyerPriceBeforeDiscount / priceBeforeDiscount = list price,
+                #   used only as a reference; the dashboard "Revenue" line matches
+                #   buyer paid + discount compensation (i.e. actual revenue).
+                buyer_price = Decimal(str(product.get("buyerPrice", 0) or 0))
+                seller_price = Decimal(str(product.get("price", 0) or 0))
+                if seller_price <= 0:
+                    seller_price = buyer_price
 
                 # Subsidies are discount-compensation accruals from Yandex Market.
-                # They need to be added to the seller's actual revenue.
-                subsidies = product.get("subsidies") or []
-                marketplace_discount = Decimal("0")
-                for sub in subsidies:
-                    if sub.get("operationType") == "ACCRUAL":
-                        marketplace_discount += Decimal(str(sub.get("amount", 0) or 0))
+                # They are added to buyer paid to get the seller's actual revenue.
+                # Order-level subsidies already contain the sum of item-level
+                # compensations plus order-wide ones (e.g. delivery discounts), so
+                # we distribute the order-level total by the item's share of the
+                # order value to avoid double counting.
+                order_subsidies = order.get("subsidies") or []
+                order_subsidy_total = sum(
+                    Decimal(str(s.get("amount", 0) or 0)) for s in order_subsidies
+                )
+                order_items_total = sum(
+                    Decimal(str(i.get("buyerPrice", 0) or 0)) * int(i.get("count", 1) or 1)
+                    for i in order.get("items", [])
+                ) or Decimal("1")
+                item_total = buyer_price * quantity
+                share = item_total / order_items_total if order_items_total > 0 else Decimal("0")
+                marketplace_discount = order_subsidy_total * share
 
                 sales.append({
-                    "date": sale_date,
+                    "date": order_date,
                     "external_sku": shop_sku,
                     "external_id": order_id,
                     "name": product.get("offerName") or product.get("name") or shop_sku,
                     "quantity": quantity,
-                    "price": price_value,
-                    "customer_price": customer_price_value,
+                    "price": seller_price,
+                    "customer_price": buyer_price,
                     "marketplace_discount": marketplace_discount,
-                    "revenue": price_value * quantity,
+                    "revenue": seller_price * quantity,
                     "commission": Decimal("0"),
                     "logistics": Decimal("0"),
                     "storage": Decimal("0"),
                     "advertising": Decimal("0"),
                     "returns": Decimal("0"),
                     "other": Decimal("0"),
-                    "is_return": order_status in ("CANCELLED", "CANCELLED_BY_CUSTOMER", "RETURNED", "PARTIALLY_RETURNED"),
+                    "is_return": is_return,
                 })
         return sales
 
     async def get_orders(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
         """Get orders from Yandex Market.
 
-        Same endpoint as sales but with different parsing.
+        Same data as get_sales.
         """
         return await self.get_sales(date_from, date_to)
 
@@ -304,26 +369,92 @@ class YandexMarketAdapter(MarketplaceAdapter):
         """Get finance report from Yandex Market.
 
         Uses /v2/reports/united-marketplace-services/generate.
-        We request the report by year/month (act-formation date) because the
-        seller dashboard shows monthly accruals, and many services are charged
-        with a delay. This makes Yandex Market expenses comparable to the LK.
+        We request the report by accrual date range (dateFrom/dateTo). This
+        endpoint returns an XLSX report with detailed expenses per SKU/service,
+        which we then parse and categorise into commission, logistics,
+        advertising, acquiring, etc.
+
+        The endpoint rejects ranges longer than ~30 days and has a strict rate
+        limit (about 1 request per 2 minutes), so we split the requested range
+        into 28-day chunks and sleep between them.
         """
         if not self.business_id:
             logger.warning("YM Business ID not available, skipping finance report")
             return []
 
-        # Try act-formation (year/month) first, because it matches the LK monthly
-        # totals. Fall back to accrual-date filtering if the API is rate-limited.
+        chunk_days = 28
+        aggregated: Dict[str, Dict[str, Decimal]] = {}
+        chunk_start = date_from
+        chunk_index = 0
+
+        while chunk_start < date_to:
+            chunk_end = min(chunk_start + timedelta(days=chunk_days), date_to)
+            chunk_index += 1
+            logger.info(
+                "YM finance report chunk %s: %s -> %s",
+                chunk_index,
+                chunk_start.date(),
+                chunk_end.date(),
+            )
+
+            reports = await self._generate_finance_report_chunk(chunk_start, chunk_end)
+            for row in reports:
+                sku = row.get("external_sku", "")
+                if sku not in aggregated:
+                    aggregated[sku] = {
+                        "commission": Decimal("0"),
+                        "logistics": Decimal("0"),
+                        "storage": Decimal("0"),
+                        "advertising": Decimal("0"),
+                        "returns": Decimal("0"),
+                        "insurance": Decimal("0"),
+                        "acquiring": Decimal("0"),
+                        "other": Decimal("0"),
+                    }
+                for key in aggregated[sku]:
+                    aggregated[sku][key] += Decimal(str(row.get(key, 0) or 0))
+
+            chunk_start = chunk_end
+            if chunk_start < date_to:
+                # Yandex Market enforces ~1 report per 2 minutes for this resource.
+                await asyncio.sleep(120)
+
+        result = []
+        for sku, amounts in aggregated.items():
+            result.append({
+                "date": datetime.utcnow(),
+                "external_sku": sku,
+                "external_id": "",
+                "quantity": 0,
+                "price": Decimal("0"),
+                "revenue": Decimal("0"),
+                **amounts,
+            })
+
+        logger.info("YM finance report parsed: %s SKU expense records", len(result))
+        return result
+
+    async def _generate_finance_report_chunk(
+        self,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> List[Dict[str, Any]]:
+        """Generate and download one finance report chunk.
+
+        Accrual-date range is the format that currently works and matches the
+        date filtering in _download_and_parse_ym_report. Year/month is kept as
+        a fallback in case Yandex Market changes the accepted payload shape.
+        """
         payloads = [
-            {
-                "businessId": int(self.business_id) if self.business_id.isdigit() else 0,
-                "year": date_to.year,
-                "month": date_to.month,
-            },
             {
                 "businessId": int(self.business_id) if self.business_id.isdigit() else 0,
                 "dateFrom": date_from.strftime("%Y-%m-%d"),
                 "dateTo": date_to.strftime("%Y-%m-%d"),
+            },
+            {
+                "businessId": int(self.business_id) if self.business_id.isdigit() else 0,
+                "year": date_to.year,
+                "month": date_to.month,
             },
         ]
 

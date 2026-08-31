@@ -394,35 +394,42 @@ class OzonAdapter(MarketplaceAdapter):
         represents a single expense category for one operation. The operation date
         is preserved so the dashboard can sum expenses by the date Ozon charged
         them, not by the date of the original sale.
+
+        The endpoint rejects ranges longer than ~30 days, so we chunk by month
+        and aggregate the results.
         """
-        page = 1
         page_size = 1000
         operations = []
 
-        while True:
-            data = await self._post_with_delay(
-                "/v3/finance/transaction/list",
-                {
-                    "filter": {
-                        "date": {
-                            "from": date_from.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-                            "to": date_to.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        chunk_start = date_from
+        while chunk_start < date_to:
+            chunk_end = min(chunk_start + timedelta(days=28), date_to)
+            page = 1
+            while True:
+                data = await self._post_with_delay(
+                    "/v3/finance/transaction/list",
+                    {
+                        "filter": {
+                            "date": {
+                                "from": chunk_start.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                                "to": chunk_end.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                            },
+                            "operation_type": [],
+                            "posting_number": "",
+                            "transaction_type": "all",
                         },
-                        "operation_type": [],
-                        "posting_number": "",
-                        "transaction_type": "all",
+                        "page": page,
+                        "page_size": page_size,
                     },
-                    "page": page,
-                    "page_size": page_size,
-                },
-            )
-            result = data.get("result", {})
-            ops = result.get("operations", [])
-            operations.extend(ops)
-            page_count = result.get("page_count", 1)
-            if page >= page_count or not ops:
-                break
-            page += 1
+                )
+                result = data.get("result", {})
+                ops = result.get("operations", [])
+                operations.extend(ops)
+                page_count = result.get("page_count", 1)
+                if page >= page_count or not ops:
+                    break
+                page += 1
+            chunk_start = chunk_end
 
         logger.info("Ozon transactions fetched: %d operations", len(operations))
 

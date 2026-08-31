@@ -29,6 +29,7 @@ class SyncService:
         credentials: Dict[str, Any] | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        sync_finance: bool = True,
     ) -> Dict[str, Any]:
         """Sync all data for a single shop.
 
@@ -169,20 +170,23 @@ class SyncService:
             await self._ensure_products(shop, all_items, names=names)
 
             # 5. Finance report
-            try:
-                finance = await adapter.get_finance_report(date_from, date_to)
-                if finance:
-                    await self._update_finance_data(shop.id, finance, date_from, date_to)
-                    await self._save_finance_transactions(
-                        shop.id, shop.marketplace, finance, date_from, date_to
-                    )
-                    results["finance"] = {"status": "success", "count": len(finance), "message": None}
-                else:
-                    results["finance"] = {"status": "success", "count": 0, "message": "No finance data"}
-            except RateLimitExceeded as e:
-                results["finance"] = {"status": "rate_limited", "count": 0, "message": str(e)}
-            except Exception as e:
-                results["finance"] = {"status": "error", "count": 0, "message": str(e)}
+            if sync_finance:
+                try:
+                    finance = await adapter.get_finance_report(date_from, date_to)
+                    if finance:
+                        await self._update_finance_data(shop.id, finance, date_from, date_to)
+                        await self._save_finance_transactions(
+                            shop.id, shop.marketplace, finance, date_from, date_to
+                        )
+                        results["finance"] = {"status": "success", "count": len(finance), "message": None}
+                    else:
+                        results["finance"] = {"status": "success", "count": 0, "message": "No finance data"}
+                except RateLimitExceeded as e:
+                    results["finance"] = {"status": "rate_limited", "count": 0, "message": str(e)}
+                except Exception as e:
+                    results["finance"] = {"status": "error", "count": 0, "message": str(e)}
+            else:
+                results["finance"] = {"status": "skipped", "count": 0, "message": "Finance sync disabled"}
 
             shop.last_sync_at = datetime.utcnow()
             await self.db.commit()
@@ -329,10 +333,14 @@ class SyncService:
         """Convert real-time orders to sales format and upsert."""
         sales = []
         for item in orders:
-            status = item.get("status", "").upper()
-            is_return = status in (
-                "CANCELLED", "CANCELLED_BY_CUSTOMER", "RETURNED", "PARTIALLY_RETURNED"
-            )
+            # Adapters may provide either a pre-computed is_return flag or a
+            # status string. Prefer the boolean flag when available.
+            is_return = bool(item.get("is_return", False))
+            if not is_return:
+                status = str(item.get("status", "")).upper()
+                is_return = status in (
+                    "CANCELLED", "CANCELLED_BY_CUSTOMER", "RETURNED", "PARTIALLY_RETURNED"
+                )
             sales.append({
                 "date": item["date"],
                 "external_sku": item["external_sku"],
@@ -462,6 +470,16 @@ class SyncService:
         Prefers real names from sales/orders over bare SKUs coming from prices.
         """
         names = names or {}
+        # Deduplicate by external_sku so the same SKU coming from both orders
+        # and prices does not trigger duplicate mapping creation in the same
+        # session before the flush happens.
+        seen: Dict[str, Dict[str, Any]] = {}
+        for item in items:
+            external_sku = item.get("external_sku")
+            if external_sku and external_sku not in seen:
+                seen[external_sku] = item
+        items = seen.values()
+
         for item in items:
             external_sku = item.get("external_sku")
             if not external_sku:
