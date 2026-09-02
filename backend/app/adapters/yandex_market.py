@@ -449,19 +449,33 @@ class YandexMarketAdapter(MarketplaceAdapter):
         url = f"{self.BASE_URL}{endpoint}"
         last_exception = None
         for attempt in range(5):
-            async with httpx.AsyncClient() as client:
-                response = await client.post(url, headers=self.headers, json=data or {}, timeout=30.0)
-                if response.status_code == 429 or response.status_code == 420:
-                    last_exception = response.raise_for_status()
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(url, headers=self.headers, json=data or {}, timeout=120.0)
+                    if response.status_code == 429 or response.status_code == 420:
+                        response.raise_for_status()
+                    response.raise_for_status()
+                    return response.json()
+            except (httpx.ConnectTimeout, httpx.ConnectError) as e:
+                last_exception = e
+                logger.warning(
+                    "YM finance report connection failed (attempt %s/5), retrying in 30s: %s",
+                    attempt + 1,
+                    e,
+                )
+                await asyncio.sleep(30)
+                continue
+            except httpx.HTTPStatusError as e:
+                last_exception = e
+                if e.response.status_code in (429, 420):
                     logger.warning(
                         "YM finance report rate limited (attempt %s/5), sleeping 150s...",
                         attempt + 1,
                     )
                     await asyncio.sleep(150)
                     continue
-                response.raise_for_status()
-                return response.json()
-        raise last_exception or RuntimeError("YM finance report POST failed after rate-limit retries")
+                raise
+        raise last_exception or RuntimeError("YM finance report POST failed after retries")
 
     async def _generate_finance_report_chunk(
         self,
