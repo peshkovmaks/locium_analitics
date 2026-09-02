@@ -416,8 +416,8 @@ class YandexMarketAdapter(MarketplaceAdapter):
 
             chunk_start = chunk_end
             if chunk_start < date_to:
-                # Yandex Market enforces ~1 report per 2 minutes for this resource.
-                await asyncio.sleep(120)
+                # Yandex Market enforces ~1 report per 2.5 minutes for this resource.
+                await asyncio.sleep(150)
 
         result = []
         for sku, amounts in aggregated.items():
@@ -433,6 +433,35 @@ class YandexMarketAdapter(MarketplaceAdapter):
 
         logger.info("YM finance report parsed: %s SKU expense records", len(result))
         return result
+
+    async def _post_finance_report(
+        self,
+        endpoint: str,
+        data: Optional[Dict] = None,
+    ) -> Any:
+        """POST to YM finance report endpoints with a relaxed rate-limit retry.
+
+        The /v2/reports/... endpoints return 420 when the caller exceeds the
+        report-generation rate limit. Experience shows the cooldown is around
+        2 minutes, so we sleep 150s between attempts instead of the fast
+        exponential backoff used for normal API calls.
+        """
+        url = f"{self.BASE_URL}{endpoint}"
+        last_exception = None
+        for attempt in range(5):
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=self.headers, json=data or {}, timeout=30.0)
+                if response.status_code == 429 or response.status_code == 420:
+                    last_exception = response.raise_for_status()
+                    logger.warning(
+                        "YM finance report rate limited (attempt %s/5), sleeping 150s...",
+                        attempt + 1,
+                    )
+                    await asyncio.sleep(150)
+                    continue
+                response.raise_for_status()
+                return response.json()
+        raise last_exception or RuntimeError("YM finance report POST failed after rate-limit retries")
 
     async def _generate_finance_report_chunk(
         self,
@@ -461,7 +490,7 @@ class YandexMarketAdapter(MarketplaceAdapter):
         gen_response = None
         for payload in payloads:
             try:
-                gen_response = await self._post(
+                gen_response = await self._post_finance_report(
                     "/v2/reports/united-marketplace-services/generate",
                     payload,
                 )
