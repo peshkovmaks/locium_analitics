@@ -1,7 +1,7 @@
 """Sync service — fetches data from marketplace APIs and saves to DB."""
 
 import logging
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 
 logger = logging.getLogger(__name__)
 from typing import List, Dict, Any
@@ -619,6 +619,15 @@ class SyncService:
         Expense columns are reset before each sync so repeated runs do not double
         count the same transactions.
         """
+
+        def _naive_utc(dt: datetime) -> datetime:
+            if dt.tzinfo is not None:
+                return dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt
+
+        date_from = _naive_utc(date_from)
+        date_to = _naive_utc(date_to)
+
         if not finance:
             return
 
@@ -746,6 +755,71 @@ class SyncService:
                 for sale in all_sales:
                     current = Decimal(getattr(sale, key))
                     setattr(sale, key, current + per_sale)
+
+    async def _update_finance_data_by_period(
+        self,
+        shop_id,
+        reports: List[Dict[str, Any]],
+        date_from: datetime,
+        date_to: datetime,
+    ):
+        """Distribute period-level finance report totals across sales in each period.
+
+        Used for Yandex Market key-indicators report where expenses are provided
+        as monthly aggregates rather than per-SKU rows.
+        """
+        if not reports:
+            return
+
+        def _naive_utc(dt: datetime) -> datetime:
+            if dt.tzinfo is not None:
+                return dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt
+
+        date_from = _naive_utc(date_from)
+        date_to = _naive_utc(date_to)
+
+        EXPENSE_KEYS = ["commission", "logistics", "storage", "advertising", "returns", "insurance", "acquiring", "other"]
+
+        # Reset expenses for the whole range once.
+        await self.db.execute(
+            update(Sale)
+            .where(
+                Sale.shop_id == shop_id,
+                Sale.date >= date_from,
+                Sale.date <= date_to,
+            )
+            .values({k: Decimal("0") for k in EXPENSE_KEYS})
+        )
+
+        for report in reports:
+            period_from = _naive_utc(report["date_from"])
+            period_to = _naive_utc(report["date_to"])
+
+            result = await self.db.execute(
+                select(Sale).where(
+                    Sale.shop_id == shop_id,
+                    Sale.date >= period_from,
+                    Sale.date <= period_to,
+                )
+            )
+            sales = result.scalars().all()
+            total_revenue = sum((sale.revenue or Decimal(0)) for sale in sales)
+
+            for key in EXPENSE_KEYS:
+                total = Decimal(str(report.get(key, 0) or 0))
+                if total == 0:
+                    continue
+                if total_revenue > 0:
+                    for sale in sales:
+                        weight = (sale.revenue or Decimal(0)) / total_revenue
+                        current = Decimal(getattr(sale, key))
+                        setattr(sale, key, current + total * weight)
+                elif sales:
+                    per_sale = total / len(sales)
+                    for sale in sales:
+                        current = Decimal(getattr(sale, key))
+                        setattr(sale, key, current + per_sale)
 
     async def initial_sync(
         self,

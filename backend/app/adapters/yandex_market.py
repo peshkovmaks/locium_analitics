@@ -170,7 +170,8 @@ class YandexMarketAdapter(MarketplaceAdapter):
             order_status = (order.get("status") or "").upper()
             substatus = (order.get("substatus") or "").upper()
             order_date = self._parse_ym_datetime(order.get("creationDate", ""))
-            order_id = str(order.get("id", ""))
+            # `id` is deprecated since 2026-10-05; prefer `orderId` when available.
+            order_id = str(order.get("orderId") or order.get("id", ""))
 
             is_return = order_status in (
                 "CANCELLED",
@@ -183,16 +184,17 @@ class YandexMarketAdapter(MarketplaceAdapter):
                 shop_sku = str(product.get("offerId") or product.get("shopSku") or "")
                 quantity = int(product.get("count", 1) or 1)
 
-                # buyerPrice = what the buyer paid after discounts.
-                # price = the seller's price before subsidies, which for Yandex
-                #   Market equals buyerPrice (subsidies are compensated on top).
-                # buyerPriceBeforeDiscount / priceBeforeDiscount = list price,
+                # buyerPrice = what the buyer paid after discounts. This is the
+                #   actual per-item price that determines seller revenue before
+                #   subsidies. The deprecated `price` field is avoided.
+                # buyerPriceBeforeDiscount / priceBeforeDiscount are list prices,
                 #   used only as a reference; the dashboard "Revenue" line matches
                 #   buyer paid + discount compensation (i.e. actual revenue).
                 buyer_price = Decimal(str(product.get("buyerPrice", 0) or 0))
-                seller_price = Decimal(str(product.get("price", 0) or 0))
+                # Fallback to deprecated `price` only when buyerPrice is missing.
+                seller_price = buyer_price
                 if seller_price <= 0:
-                    seller_price = buyer_price
+                    seller_price = Decimal(str(product.get("price", 0) or 0))
 
                 # Subsidies are discount-compensation accruals from Yandex Market.
                 # They are added to buyer paid to get the seller's actual revenue.
@@ -434,6 +436,241 @@ class YandexMarketAdapter(MarketplaceAdapter):
         logger.info("YM finance report parsed: %s SKU expense records", len(result))
         return result
 
+    async def get_key_indicators_report(
+        self,
+        date_from: datetime,
+        date_to: datetime,
+        detalization: str = "MONTH",
+    ) -> List[Dict[str, Any]]:
+        """Get key indicators report from Yandex Market.
+
+        This report mirrors the "Ключевые показатели" page in the seller's
+        cabinet. It returns period-level totals for revenue, orders, average
+        check, marketplace services and promotion costs. We parse the full
+        sheet and return one record per period so SyncService can distribute
+        expenses across sales in that period.
+        """
+        if not self.business_id:
+            logger.warning("YM Business ID not available, skipping key indicators report")
+            return []
+
+        payload = {
+            "businessId": int(self.business_id) if self.business_id.isdigit() else 0,
+            "detalizationLevel": detalization,
+        }
+
+        gen_response = await self._post_finance_report(
+            "/v2/reports/key-indicators/generate",
+            payload,
+        )
+        report_id = gen_response.get("result", {}).get("reportId") or gen_response.get("reportId")
+        if not report_id:
+            logger.warning("YM key indicators report did not return reportId")
+            return []
+
+        file_url = None
+        for attempt in range(30):
+            await asyncio.sleep(5)
+            try:
+                info = await self._get(f"/v2/reports/info/{report_id}")
+            except httpx.HTTPStatusError as e:
+                logger.warning("YM report info request failed: %s", e)
+                continue
+
+            status = (info.get("result") or info or {}).get("status", "").upper()
+            if status == "DONE":
+                file_url = (info.get("result") or info or {}).get("file")
+                logger.info("YM key indicators report ready after %s attempts", attempt + 1)
+                break
+            elif status in ("FAILED", "ERROR", "CANCELLED"):
+                logger.warning("YM key indicators report generation failed with status: %s", status)
+                return []
+
+        if not file_url:
+            logger.warning("YM key indicators report did not become ready in time")
+            return []
+
+        content = await self._download_report_file(file_url)
+        if not content:
+            return []
+        return self._parse_key_indicators_xlsx(content, date_from, date_to)
+
+    async def _download_report_file(self, file_url: str) -> Optional[bytes]:
+        """Download a report file from Yandex Market."""
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as client:
+                response = await client.get(file_url)
+                response.raise_for_status()
+                return response.content
+        except Exception as e:
+            logger.warning("YM report download failed: %s", e)
+            return None
+
+    def _parse_key_indicators_xlsx(
+        self,
+        content: bytes,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> List[Dict[str, Any]]:
+        """Parse YM key indicators XLSX and return period-level rows."""
+        if not content.startswith(b"PK"):
+            logger.warning("YM key indicators report is not an XLSX/ZIP archive")
+            return []
+
+        # Russian month names -> number
+        _MONTHS = {
+            "январь": 1, "февраль": 2, "март": 3, "апрель": 4,
+            "май": 5, "июнь": 6, "июль": 7, "август": 8,
+            "сентябрь": 9, "октябрь": 10, "ноябрь": 11, "декабрь": 12,
+        }
+
+        def _parse_period(value: Any) -> Optional[Dict[str, Any]]:
+            text = str(value).strip()
+            lowered = text.lower()
+            # Skip total/aggregation rows like "Итого с 01.07.2026".
+            if "итого" in lowered:
+                return None
+            # Formats: "Август 2026", "август 26", "2026-08", "08.2026"
+            for name, num in _MONTHS.items():
+                if name in lowered:
+                    year_part = lowered.replace(name, "").strip()
+                    if not year_part:
+                        return None
+                    year = int(year_part) if len(year_part) == 4 else (2000 + int(year_part))
+                    month = num
+                    start = datetime(year, month, 1)
+                    if month == 12:
+                        end = datetime(year + 1, 1, 1) - timedelta(seconds=1)
+                    else:
+                        end = datetime(year, month + 1, 1) - timedelta(seconds=1)
+                    return {"start": start, "end": end}
+            # Try ISO "2026-08" or dotted "08.2026"
+            for fmt in ("%Y-%m", "%m.%Y"):
+                try:
+                    parsed = datetime.strptime(lowered, fmt)
+                    start = parsed.replace(day=1)
+                    if start.month == 12:
+                        end = datetime(start.year + 1, 1, 1) - timedelta(seconds=1)
+                    else:
+                        end = datetime(start.year, start.month + 1, 1) - timedelta(seconds=1)
+                    return {"start": start, "end": end}
+                except ValueError:
+                    continue
+            return None
+
+        def _num(value: Any) -> Decimal:
+            if value is None or value == "":
+                return Decimal("0")
+            text = str(value).replace(" ", "").replace(",", ".")
+            try:
+                return Decimal(text)
+            except Exception:
+                return Decimal("0")
+
+        reports: List[Dict[str, Any]] = []
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as z:
+                sheet_names = self._read_sheet_names(z)
+                target_file = None
+                for file_name, name in sheet_names.items():
+                    lowered_name = name.lower()
+                    if "все" in lowered_name or "full" in lowered_name or "key_indicators_full" in file_name.lower():
+                        target_file = file_name
+                        break
+                if not target_file:
+                    # Fallback to the "Расходы" (expenses) sheet.
+                    for file_name, name in sheet_names.items():
+                        if "расходы" in name.lower():
+                            target_file = file_name
+                            break
+                if not target_file:
+                    logger.warning("Could not find key indicators full/expenses sheet in YM report")
+                    return []
+
+                rows = self._parse_xlsx_sheet(z, target_file)
+                if not rows:
+                    return []
+
+                header_row_index = None
+                header_map: Dict[str, int] = {}
+                for idx, row in enumerate(rows):
+                    cells = [str(c).strip().lower() for c in row]
+                    if "период" in cells:
+                        header_row_index = idx
+                        header_map = {c: i for i, c in enumerate(cells) if c}
+                        break
+
+                if header_row_index is None:
+                    logger.warning("Could not find header row in YM key indicators sheet")
+                    return []
+
+                period_idx = self._find_col(header_map, "период", "period")
+                gmv_idx = self._find_col(header_map, "выручка", "gmv")
+                orders_idx = self._find_col(header_map, "доставленные заказы", "ordersdelivered")
+                avg_price_idx = self._find_col(header_map, "средний чек заказа", "ordersavgprice")
+                subsidy_idx = self._find_col(header_map, "все платежи за скидки", "totalsubsidy")
+                services_idx = self._find_col(header_map, "стоимость всех услуг маркета без продвижения", "serviceswithoutpromotion")
+                promotion_idx = self._find_col(header_map, "стоимость услуг продвижения", "promotionservices")
+                fee_idx = self._find_col(header_map, "стоимость размещения товаров на витрине", "fee")
+                acquiring_idx = self._find_col(header_map, "приём и перевод платежа покупателя", "paymentacceptanceandtransfer")
+                logistics_idx = self._find_col(header_map, "стоимость услуг логистики", "logisticservices")
+                warehouse_idx = self._find_col(header_map, "стоимость услуг склада", "warehouseservices")
+                boost_idx = self._find_col(header_map, "расходы на буст продаж", "boost")
+                promotion_shows_idx = self._find_col(header_map, "расходы на продвижение с оплатой за показы", "promotionwithshows")
+                loyalty_idx = self._find_col(header_map, "участие в программе лояльности и отзывы", "loyaltyparticipationfee")
+                extended_idx = self._find_col(header_map, "расширенный доступ к сервисам маркетплейса", "extendedaccesspayment")
+
+                for row in rows[header_row_index + 1:]:
+                    if period_idx is None or period_idx >= len(row):
+                        continue
+                    period = _parse_period(row[period_idx])
+                    if period is None:
+                        continue
+                    # Skip rows outside the requested range
+                    if period["end"] < date_from.replace(tzinfo=None) or period["start"] > date_to.replace(tzinfo=None):
+                        continue
+
+                    gmv = _num(row[gmv_idx] if gmv_idx is not None and gmv_idx < len(row) else "")
+                    orders = int(_num(row[orders_idx] if orders_idx is not None and orders_idx < len(row) else ""))
+                    avg_price = _num(row[avg_price_idx] if avg_price_idx is not None and avg_price_idx < len(row) else "")
+                    subsidy = _num(row[subsidy_idx] if subsidy_idx is not None and subsidy_idx < len(row) else "")
+                    services_without_promotion = _num(row[services_idx] if services_idx is not None and services_idx < len(row) else "")
+                    promotion_services = _num(row[promotion_idx] if promotion_idx is not None and promotion_idx < len(row) else "")
+                    fee = _num(row[fee_idx] if fee_idx is not None and fee_idx < len(row) else "")
+                    acquiring = _num(row[acquiring_idx] if acquiring_idx is not None and acquiring_idx < len(row) else "")
+                    logistics = _num(row[logistics_idx] if logistics_idx is not None and logistics_idx < len(row) else "")
+                    warehouse = _num(row[warehouse_idx] if warehouse_idx is not None and warehouse_idx < len(row) else "")
+                    boost = _num(row[boost_idx] if boost_idx is not None and boost_idx < len(row) else "")
+                    promotion_with_shows = _num(row[promotion_shows_idx] if promotion_shows_idx is not None and promotion_shows_idx < len(row) else "")
+                    loyalty = _num(row[loyalty_idx] if loyalty_idx is not None and loyalty_idx < len(row) else "")
+                    extended = _num(row[extended_idx] if extended_idx is not None and extended_idx < len(row) else "")
+
+                    reports.append({
+                        "date_from": period["start"],
+                        "date_to": period["end"],
+                        "gmv": gmv,
+                        "orders_delivered": orders,
+                        "avg_price": avg_price,
+                        "total_subsidy": subsidy,
+                        "services_without_promotion": services_without_promotion,
+                        "promotion_services": promotion_services,
+                        # Category breakdown
+                        "commission": fee,
+                        "logistics": logistics,
+                        "storage": warehouse,
+                        "advertising": promotion_services + boost + promotion_with_shows,
+                        "acquiring": acquiring,
+                        "other": loyalty + extended,
+                        "returns": Decimal("0"),
+                        "insurance": Decimal("0"),
+                    })
+        except Exception as e:
+            logger.warning("YM key indicators XLSX parsing failed: %s", e)
+            return []
+
+        logger.info("YM key indicators report parsed: %s period records", len(reports))
+        return reports
+
     async def _post_finance_report(
         self,
         endpoint: str,
@@ -635,7 +872,10 @@ class YandexMarketAdapter(MarketplaceAdapter):
             parsed = _parse_datetime(value)
             if parsed is None:
                 return True
-            return date_from <= parsed <= date_to
+            # Sale.date is naive UTC; compare against naive bounds.
+            df = date_from.replace(tzinfo=None) if date_from.tzinfo else date_from
+            dt = date_to.replace(tzinfo=None) if date_to.tzinfo else date_to
+            return df <= parsed <= dt
 
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as z:
@@ -830,25 +1070,33 @@ class YandexMarketAdapter(MarketplaceAdapter):
         intermediate columns like "Стоимость услуги без учёта ограничений
         тарифа" instead of "Стоимость услуги (AX = ...), ₽".
         """
-        for name in names:
+        import re
+
+        def _normalize(text: str) -> str:
+            return re.sub(r"\s+", " ", text.replace("\n", " ")).strip()
+
+        normalized_map = {_normalize(h): idx for h, idx in header_map.items()}
+
+        for raw_name in names:
+            name = _normalize(raw_name)
             # Exact match first
-            for header, idx in header_map.items():
-                if header.strip().rstrip(",₽") == name:
+            for header, idx in normalized_map.items():
+                if header.rstrip(",₽") == name:
                     return idx
             # Exact match ignoring currency suffix
-            for header, idx in header_map.items():
+            for header, idx in normalized_map.items():
                 clean = header.replace(", ₽", "").replace("₽", "").strip()
                 if clean == name:
                     return idx
             # Final amount column: contains the name and a currency suffix,
             # and does not describe an intermediate calculation.
-            for header, idx in header_map.items():
+            for header, idx in normalized_map.items():
                 if name in header and "₽" in header and not any(
                     k in header for k in ("без", "учёта", "ограничений", "мин.", "максимальный")
                 ):
                     return idx
             # Fallback to substring
-            for header, idx in header_map.items():
+            for header, idx in normalized_map.items():
                 if name in header:
                     return idx
         return None

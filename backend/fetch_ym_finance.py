@@ -33,9 +33,9 @@ async def main(days: int = 210):
         date_to = datetime.now(timezone.utc)
         date_from = date_to - timedelta(days=days)
 
-        print(f"Fetching YM finance report from {date_from.date()} to {date_to.date()}...", flush=True)
-        finance = await adapter.get_finance_report(date_from, date_to)
-        print(f"Parsed {len(finance)} SKU expense rows", flush=True)
+        print(f"Fetching YM key indicators report from {date_from.date()} to {date_to.date()}...", flush=True)
+        finance = await adapter.get_key_indicators_report(date_from, date_to, detalization="MONTH")
+        print(f"Parsed {len(finance)} period rows", flush=True)
 
         totals = {}
         for row in finance:
@@ -46,7 +46,7 @@ async def main(days: int = 210):
 
         if finance:
             service = SyncService(db)
-            await service._update_finance_data(shop.id, finance, date_from, date_to)
+            await service._update_finance_data_by_period(shop.id, finance, date_from, date_to)
             await db.commit()
             print("Saved expenses to Sale rows", flush=True)
 
