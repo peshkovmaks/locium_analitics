@@ -52,6 +52,64 @@ async def _async_sync_all_shops():
 
 
 @celery_app.task
+def sync_wb_finance_task():
+    """Sync WB finance reports once a day.
+
+    WB detailed sales reports appear with a multi-day delay, so a 4-hour
+    lookback of 1 day never returns anything useful — and each attempt hits
+    finance-api.wildberries.ru, which rate-limits by caller IP aggressively.
+    A single daily run with a 10-day lookback catches delayed reports without
+    poking the blocked endpoint every sync cycle.
+    """
+    asyncio.run(_async_sync_wb_finance())
+
+
+async def _async_sync_wb_finance():
+    from app.models import Marketplace, Shop
+    from app.utils.encryption import decrypt_dict
+    from app.adapters.base import AdapterFactory
+
+    async with _task_session() as db:
+        result = await db.execute(
+            select(Shop).where(
+                Shop.is_active == True,
+                Shop.sync_enabled == True,
+                Shop.marketplace == Marketplace.wb,
+            )
+        )
+        shops = result.scalars().all()
+        sync_service = SyncService(db)
+
+        days_back = 10
+        end = datetime.utcnow()
+        start = (end - timedelta(days=days_back)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+
+        for shop in shops:
+            try:
+                adapter = AdapterFactory.create(
+                    shop.marketplace.value,
+                    str(shop.id),
+                    decrypt_dict(shop.credentials),
+                )
+                if not await adapter.authenticate():
+                    print(f"WB finance sync: auth failed for shop {shop.id}")
+                    continue
+                finance = await adapter.get_finance_report(start, end)
+                if finance:
+                    await sync_service._update_finance_data(shop.id, finance, start, end)
+                    await sync_service._save_finance_transactions(
+                        shop.id, shop.marketplace, finance, start, end
+                    )
+                await db.commit()
+                print(f"WB finance sync: shop {shop.id}: {len(finance or [])} rows")
+            except Exception as e:
+                await db.rollback()
+                print(f"WB finance sync failed for shop {shop.id}: {type(e).__name__}: {e}")
+
+
+@celery_app.task
 def send_daily_report_task():
     """Send daily report at 21:00."""
     asyncio.run(_async_send_daily_reports())

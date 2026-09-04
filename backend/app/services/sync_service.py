@@ -13,7 +13,10 @@ from sqlalchemy.orm import selectinload
 
 from app.adapters.base import AdapterFactory
 from app.adapters.wildberries import RateLimitExceeded
-from app.models import Shop, Sale, Stock, Advert, Product, ProductShopMapping, SyncLog, ShopBalance, FinanceTransaction
+from app.models import (
+    Shop, Sale, Stock, Advert, Product, ProductShopMapping, SyncLog, ShopBalance,
+    FinanceTransaction, Marketplace,
+)
 
 
 class SyncService:
@@ -889,7 +892,14 @@ class SyncService:
 
         results = []
         for shop in shops:
-            shop_result = await self.sync_shop(shop, days_back)
+            # WB detailed sales reports appear with a multi-day delay and
+            # finance-api rate-limits by caller IP, so the 4-hour cycle must
+            # not touch it — WB finance is synced by the daily
+            # sync_wb_finance_task instead. Other marketplaces keep syncing
+            # finance every cycle.
+            shop_result = await self.sync_shop(
+                shop, days_back, sync_finance=shop.marketplace != Marketplace.wb
+            )
             results.append(shop_result)
 
         return results

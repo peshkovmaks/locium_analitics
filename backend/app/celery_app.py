@@ -23,6 +23,10 @@ celery_app.conf.update(
             "task": "app.tasks.sync.sync_all_shops_task",
             "schedule": 4 * 60 * 60,  # 4 hours
         },
+        "sync-wb-finance-daily": {
+            "task": "app.tasks.sync.sync_wb_finance_task",
+            "schedule": crontab(hour=5, minute=7),
+        },
         "daily-report-21-00": {
             "task": "app.tasks.sync.send_daily_report_task",
             "schedule": crontab(hour=21, minute=0),
