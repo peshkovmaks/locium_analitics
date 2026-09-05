@@ -895,10 +895,16 @@ class SyncService:
             # WB detailed sales reports appear with a multi-day delay and
             # finance-api rate-limits by caller IP, so the 4-hour cycle must
             # not touch it — WB finance is synced by the daily
-            # sync_wb_finance_task instead. Other marketplaces keep syncing
-            # finance every cycle.
+            # sync_wb_finance_task instead. YM finance is fed by the
+            # key-indicators report (order-month semantics, matches the seller
+            # cabinet); the API report is accrual-date based and barely covers
+            # the most recent day, so letting the 4-hour cycle wipe and
+            # refill the last day would permanently understate it. Other
+            # marketplaces keep syncing finance every cycle.
             shop_result = await self.sync_shop(
-                shop, days_back, sync_finance=shop.marketplace != Marketplace.wb
+                shop,
+                days_back,
+                sync_finance=shop.marketplace not in (Marketplace.wb, Marketplace.yandex_market),
             )
             results.append(shop_result)
 

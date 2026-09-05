@@ -609,6 +609,7 @@ class YandexMarketAdapter(MarketplaceAdapter):
                 orders_idx = self._find_col(header_map, "доставленные заказы", "ordersdelivered")
                 avg_price_idx = self._find_col(header_map, "средний чек заказа", "ordersavgprice")
                 subsidy_idx = self._find_col(header_map, "все платежи за скидки", "totalsubsidy")
+                plus_balls_idx = self._find_col(header_map, "платежи за скидки по баллам яндекс плюса", "yandexplusballs")
                 services_idx = self._find_col(header_map, "стоимость всех услуг маркета без продвижения", "serviceswithoutpromotion")
                 promotion_idx = self._find_col(header_map, "стоимость услуг продвижения", "promotionservices")
                 fee_idx = self._find_col(header_map, "стоимость размещения товаров на витрине", "fee")
@@ -644,6 +645,7 @@ class YandexMarketAdapter(MarketplaceAdapter):
                     promotion_with_shows = _num(row[promotion_shows_idx] if promotion_shows_idx is not None and promotion_shows_idx < len(row) else "")
                     loyalty = _num(row[loyalty_idx] if loyalty_idx is not None and loyalty_idx < len(row) else "")
                     extended = _num(row[extended_idx] if extended_idx is not None and extended_idx < len(row) else "")
+                    plus_balls = _num(row[plus_balls_idx] if plus_balls_idx is not None and plus_balls_idx < len(row) else "")
 
                     reports.append({
                         "date_from": period["start"],
@@ -658,9 +660,13 @@ class YandexMarketAdapter(MarketplaceAdapter):
                         "commission": fee,
                         "logistics": logistics,
                         "storage": warehouse,
-                        "advertising": promotion_services + boost + promotion_with_shows,
+                        # In the "Все" sheet the "услуги продвижения" column is
+                        # the total and already includes буст/показы — adding
+                        # them on top would double-count (they carry the same
+                        # value in every period).
+                        "advertising": max(promotion_services, boost + promotion_with_shows),
                         "acquiring": acquiring,
-                        "other": loyalty + extended,
+                        "other": loyalty + extended + plus_balls,
                         "returns": Decimal("0"),
                         "insurance": Decimal("0"),
                     })

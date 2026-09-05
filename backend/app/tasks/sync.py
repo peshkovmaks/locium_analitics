@@ -52,6 +52,61 @@ async def _async_sync_all_shops():
 
 
 @celery_app.task
+def sync_ym_key_indicators_task():
+    """Sync YM key-indicators expenses once a day via API.
+
+    The key-indicators report is the API equivalent of the seller cabinet's
+    "Ключевые показатели" page: monthly expense totals (services, promotion,
+    acquiring, Plus-balls discounts) that match the cabinet semantics. The
+    alternative united-marketplace-services report is accrual-date based and
+    barely covers the most recent day, so it cannot feed the dashboard.
+    YM finance is excluded from the 4-hour cycle for the same reason.
+    """
+    asyncio.run(_async_sync_ym_key_indicators())
+
+
+async def _async_sync_ym_key_indicators():
+    from app.models import Marketplace, Shop
+    from app.utils.encryption import decrypt_dict
+    from app.adapters.base import AdapterFactory
+
+    async with _task_session() as db:
+        result = await db.execute(
+            select(Shop).where(
+                Shop.is_active == True,
+                Shop.sync_enabled == True,
+                Shop.marketplace == Marketplace.yandex_market,
+            )
+        )
+        shops = result.scalars().all()
+        sync_service = SyncService(db)
+
+        end = datetime.utcnow()
+        # API history is capped at ~90 days; align to month start so monthly
+        # periods are distributed whole.
+        start = (end - timedelta(days=90)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        for shop in shops:
+            try:
+                adapter = AdapterFactory.create(
+                    shop.marketplace.value,
+                    str(shop.id),
+                    decrypt_dict(shop.credentials),
+                )
+                if not await adapter.authenticate():
+                    print(f"YM key-indicators sync: auth failed for shop {shop.id}")
+                    continue
+                reports = await adapter.get_key_indicators_report(start, end)
+                if reports:
+                    await sync_service._update_finance_data_by_period(shop.id, reports, start, end)
+                await db.commit()
+                print(f"YM key-indicators sync: shop {shop.id}: {len(reports or [])} period rows")
+            except Exception as e:
+                await db.rollback()
+                print(f"YM key-indicators sync failed for shop {shop.id}: {type(e).__name__}: {e}")
+
+
+@celery_app.task
 def sync_wb_finance_task():
     """Sync WB finance reports once a day.
 

@@ -80,24 +80,28 @@ def _sale_expenses(s: Sale) -> Decimal:
 
 
 def _gross_revenue(s: Sale) -> Decimal:
-    """Gross order amount — the larger of seller price and buyer price."""
+    """Order amount including marketplace discount/СПП/bonus compensation —
+    the money the seller actually receives."""
     cp = _to_decimal(s.customer_price)
     if cp > 0:
-        return max(_to_decimal(s.price), cp) * (s.quantity or 0)
-    return _to_decimal(s.revenue)
+        return (
+            min(_to_decimal(s.price), cp) * (s.quantity or 0)
+            + _to_decimal(s.marketplace_discount)
+        )
+    return _to_decimal(s.revenue) + _to_decimal(s.marketplace_discount)
 
 
-def _net_revenue(s: Sale) -> Decimal:
-    """Net revenue to the seller — the smaller of seller price and buyer price."""
+def _buyer_revenue(s: Sale) -> Decimal:
+    """Amount actually paid by the customer."""
     cp = _to_decimal(s.customer_price)
     if cp > 0:
-        return min(_to_decimal(s.price), cp) * (s.quantity or 0)
+        return cp * (s.quantity or 0)
     return _to_decimal(s.revenue)
 
 
 def _actual_revenue(s: Sale) -> Decimal:
-    """Net revenue plus marketplace discount compensation (e.g. Ozon points)."""
-    return _net_revenue(s) + _to_decimal(s.marketplace_discount)
+    """Actually paid by the customer (alias of _buyer_revenue)."""
+    return _buyer_revenue(s)
 
 
 def _shop_expenses(
@@ -340,29 +344,26 @@ async def get_dashboard(
         return _shop_ads_from_sales(shop_id)
 
     def _gross_revenue(s: Sale) -> Decimal:
-        """Gross order amount — the larger of seller price and buyer price."""
+        """Order amount including marketplace discount/СПП/bonus compensation —
+        the money the seller actually receives."""
         cp = _to_decimal(s.customer_price)
         if cp > 0:
-            return max(_to_decimal(s.price), cp) * (s.quantity or 0)
-        return _to_decimal(s.revenue)
-
-    def _net_revenue(s: Sale) -> Decimal:
-        """Net revenue to the seller — the smaller of seller price and buyer price."""
-        cp = _to_decimal(s.customer_price)
-        if cp > 0:
-            return min(_to_decimal(s.price), cp) * (s.quantity or 0)
-        return _to_decimal(s.revenue)
+            return (
+                min(_to_decimal(s.price), cp) * (s.quantity or 0)
+                + _to_decimal(s.marketplace_discount)
+            )
+        return _to_decimal(s.revenue) + _to_decimal(s.marketplace_discount)
 
     def _buyer_revenue(s: Sale) -> Decimal:
-        """Revenue at the buyer-paid price, used for unit economics average price."""
+        """Amount actually paid by the customer."""
         cp = _to_decimal(s.customer_price)
         if cp > 0:
             return cp * (s.quantity or 0)
         return _to_decimal(s.revenue)
 
     def _actual_revenue(s: Sale) -> Decimal:
-        """Net revenue plus marketplace discount compensation (e.g. Ozon points)."""
-        return _net_revenue(s) + _to_decimal(s.marketplace_discount)
+        """Actually paid by the customer (alias of _buyer_revenue)."""
+        return _buyer_revenue(s)
 
     # Calculate KPIs for the current period
     current = _calc_period_kpis(sales, returns, finance_transactions, adverts, shops, products)
@@ -669,7 +670,7 @@ async def get_dashboard(
         if day is None:
             continue
         daily_revenue.setdefault(key, {})
-        daily_revenue[key][day] = daily_revenue[key].get(day, Decimal(0)) + _to_decimal(s.revenue)
+        daily_revenue[key][day] = daily_revenue[key].get(day, Decimal(0)) + _gross_revenue(s)
         daily_actual_revenue.setdefault(key, {})
         daily_actual_revenue[key][day] = daily_actual_revenue[key].get(day, Decimal(0)) + _buyer_revenue(s)
 
@@ -684,12 +685,11 @@ async def get_dashboard(
         mp = shop.marketplace.value
 
         total_qty = sum(s.quantity or 0 for s in s_sales)
-        total_revenue_sku = sum(_to_decimal(s.revenue) for s in s_sales)
-        total_actual_revenue_sku = sum(_buyer_revenue(s) for s in s_sales)
+        total_revenue_sku = sum(_gross_revenue(s) for s in s_sales)
         total_expenses_sku = sum(_sale_expenses(s) for s in s_sales)
         total_ads_sku = sum(_to_decimal(s.advertising) for s in s_sales)
 
-        avg_price = (total_actual_revenue_sku / total_qty) if total_qty > 0 else Decimal(0)
+        avg_price = (total_revenue_sku / total_qty) if total_qty > 0 else Decimal(0)
         expense_per_unit = (total_expenses_sku / total_qty) if total_qty > 0 else Decimal(0)
         net_per = avg_price - _to_decimal(p.cost_price) - expense_per_unit
         margin = (net_per / avg_price * 100) if avg_price > 0 else Decimal(0)
@@ -733,8 +733,8 @@ async def get_dashboard(
     for p in products.values():
         p_sales = [s for s in sales if s.external_sku == p.sku]
         p_returns = [r for r in returns if r.external_sku == p.sku]
-        p_revenue = sum(_to_decimal(s.revenue) for s in p_sales) - sum(
-            _to_decimal(r.revenue) for r in p_returns
+        p_revenue = sum(_gross_revenue(s) for s in p_sales) - sum(
+            _gross_revenue(r) for r in p_returns
         )
         p_actual_revenue = sum(_actual_revenue(s) for s in p_sales) - sum(
             _actual_revenue(r) for r in p_returns
