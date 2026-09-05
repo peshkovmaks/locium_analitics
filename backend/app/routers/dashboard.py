@@ -234,16 +234,19 @@ async def get_dashboard(
             hour=0, minute=0, second=0, microsecond=0
         )
         end_dt = now
-    elif period == "3m":
-        # Rolling 3 calendar months: current month plus the two previous
-        # ones. When a new month starts, the oldest of the three drops out.
-        m = now.month - 2
-        y = now.year
-        while m <= 0:
-            m += 12
-            y -= 1
-        start_dt = datetime(y, m, 1)
-        end_dt = now
+    elif period.startswith("m:"):
+        # Single calendar month ("m:2026-08"). The frontend renders buttons
+        # for the last three full months and shifts the set as a new month begins.
+        try:
+            y, m = map(int, period[2:].split("-"))
+            start_dt = datetime(y, m, 1)
+            next_month = datetime(y + 1, 1, 1) if m == 12 else datetime(y, m + 1, 1)
+            end_dt = next_month - timedelta(microseconds=1)
+        except ValueError:
+            start_dt = (now - timedelta(days=30)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            end_dt = now
     else:
         start_dt = (now - timedelta(days=30)).replace(
             hour=0, minute=0, second=0, microsecond=0

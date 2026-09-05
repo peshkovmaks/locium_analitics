@@ -871,7 +871,15 @@ export default function Dashboard() {
               { key: 'today', label: 'Сегодня' },
               { key: '7d', label: '7 дней' },
               { key: '30d', label: '30 дней' },
-              { key: '3m', label: '3 мес' },
+              // Last three full months; the set shifts as a new month begins.
+              ...Array.from({ length: 3 }, (_, i) => {
+                const d = new Date();
+                d.setDate(1);
+                d.setMonth(d.getMonth() - (i + 1));
+                const key = `m:${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                const label = d.toLocaleDateString('ru-RU', { month: 'long' });
+                return { key, label: label.charAt(0).toUpperCase() + label.slice(1) };
+              }),
             ].map((p) => (
               <button
                 key={p.key}
