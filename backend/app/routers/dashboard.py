@@ -234,6 +234,16 @@ async def get_dashboard(
             hour=0, minute=0, second=0, microsecond=0
         )
         end_dt = now
+    elif period == "3m":
+        # Rolling 3 calendar months: current month plus the two previous
+        # ones. When a new month starts, the oldest of the three drops out.
+        m = now.month - 2
+        y = now.year
+        while m <= 0:
+            m += 12
+            y -= 1
+        start_dt = datetime(y, m, 1)
+        end_dt = now
     else:
         start_dt = (now - timedelta(days=30)).replace(
             hour=0, minute=0, second=0, microsecond=0
@@ -686,13 +696,13 @@ async def get_dashboard(
 
         total_qty = sum(s.quantity or 0 for s in s_sales)
         total_revenue_sku = sum(_gross_revenue(s) for s in s_sales)
+        actual_price = (sum(_buyer_revenue(s) for s in s_sales) / total_qty) if total_qty > 0 else Decimal(0)
         total_expenses_sku = sum(_sale_expenses(s) for s in s_sales)
         total_ads_sku = sum(_to_decimal(s.advertising) for s in s_sales)
 
-        avg_price = (total_revenue_sku / total_qty) if total_qty > 0 else Decimal(0)
         expense_per_unit = (total_expenses_sku / total_qty) if total_qty > 0 else Decimal(0)
-        net_per = avg_price - _to_decimal(p.cost_price) - expense_per_unit
-        margin = (net_per / avg_price * 100) if avg_price > 0 else Decimal(0)
+        net_per = actual_price - _to_decimal(p.cost_price) - expense_per_unit
+        margin = (net_per / actual_price * 100) if actual_price > 0 else Decimal(0)
         drr_sku = (total_ads_sku / total_revenue_sku * 100) if total_revenue_sku > 0 else Decimal(0)
 
         if p.sku not in product_unit_map:
@@ -712,7 +722,7 @@ async def get_dashboard(
             UnitEconomicsMarketplaceRow(
                 marketplace=MP_NAMES.get(mp, mp),
                 sales=total_qty,
-                price=avg_price,
+                actual_price=actual_price,
                 cost=p.cost_price,
                 expense_per_unit=expense_per_unit,
                 net_per_unit=net_per,

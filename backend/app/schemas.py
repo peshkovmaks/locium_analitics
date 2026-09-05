@@ -181,7 +181,7 @@ class MarketplaceComparison(BaseModel):
 class UnitEconomicsMarketplaceRow(BaseModel):
     marketplace: str
     sales: int
-    price: Decimal
+    actual_price: Decimal
     cost: Decimal
     expense_per_unit: Decimal
     net_per_unit: Decimal

@@ -611,7 +611,7 @@ function ProductsTable({ rows, unitEconomics }) {
                   <tr>
                     <th className="text-left py-1.5 font-normal">Площадка</th>
                     <th className="text-right py-1.5 font-normal">Продано</th>
-                    <th className="text-right py-1.5 font-normal">Цена</th>
+                    <th className="text-right py-1.5 font-normal">Фактическая цена</th>
                     <th className="text-right py-1.5 font-normal">Себест.</th>
                     <th className="text-right py-1.5 font-normal">Расх. МП</th>
                     <th className="text-right py-1.5 font-normal">Чистая/шт</th>
@@ -634,7 +634,7 @@ function ProductsTable({ rows, unitEconomics }) {
                           </Badge>
                         </td>
                         <td className="text-right tabular-nums">{r.sales}</td>
-                        <td className="text-right tabular-nums">{formatMoney(r.price)}</td>
+                        <td className="text-right tabular-nums">{formatMoney(r.actual_price)}</td>
                         <td className="text-right text-gray-500 tabular-nums">{formatMoney(r.cost)}</td>
                         <td className="text-right text-gray-500 tabular-nums">{formatMoney(r.expense_per_unit)}</td>
                         <td className="text-right">
@@ -871,6 +871,7 @@ export default function Dashboard() {
               { key: 'today', label: 'Сегодня' },
               { key: '7d', label: '7 дней' },
               { key: '30d', label: '30 дней' },
+              { key: '3m', label: '3 мес' },
             ].map((p) => (
               <button
                 key={p.key}
