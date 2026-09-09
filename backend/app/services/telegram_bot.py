@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from app.models import User, Shop, Sale, Stock, Product, Advert, SyncLog, ShopBalance
+from app.models import User, Shop, Sale, Stock, Product, Advert, SyncLog, ShopBalance, FinanceTransaction
 from app.config import get_settings
 from app.services.metrics import (
     to_decimal as _to_decimal,
@@ -48,129 +48,37 @@ class TelegramBotService:
         _alert_throttle[key] = now
         return True
 
-    async def send_daily_report(self, db: AsyncSession, user_id: str) -> bool:
-        """Send daily report to user at 21:00.
+    async def _ozon_finance_expenses(
+        self, db: AsyncSession, shops: List[Shop], start: datetime, end: datetime
+    ) -> Dict[Any, Decimal]:
+        """Per-shop expense totals from finance_transactions for Ozon shops.
 
-        Includes:
-        - Total revenue, net profit, DRR
-        - Breakdown by marketplace
-        - Top 3 products by profit
+        Ozon sale rows carry no per-sale expense columns — all commissions,
+        logistics, advertising etc. arrive as finance transactions, the same
+        source the dashboard uses for Ozon expenses.
         """
-        if not self.bot or not self.settings.telegram_chat_id:
-            return False
-
-        # Get user's data for today
-        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        yesterday = today - timedelta(days=1)
-
-        # Get shops
-        result = await db.execute(select(Shop).where(Shop.user_id == user_id))
-        shops = result.scalars().all()
-        shop_ids = [s.id for s in shops]
-
-        if not shop_ids:
-            return False
-
-        # Get today's sales
-        sales_result = await db.execute(
-            select(Sale).where(
-                Sale.shop_id.in_(shop_ids),
-                Sale.date >= today,
-                Sale.is_return == False,
+        ozon_shop_ids = [s.id for s in shops if s.marketplace.value == "ozon"]
+        if not ozon_shop_ids:
+            return {}
+        result = await db.execute(
+            select(FinanceTransaction).where(
+                FinanceTransaction.shop_id.in_(ozon_shop_ids),
+                FinanceTransaction.operation_date >= start,
+                FinanceTransaction.operation_date <= end,
             )
         )
-        sales = sales_result.scalars().all()
-
-        # Get adverts
-        adverts_result = await db.execute(
-            select(Advert).where(Advert.shop_id.in_(shop_ids), Advert.date >= today)
-        )
-        adverts = adverts_result.scalars().all()
-
-        # Calculate metrics
-        total_revenue = sum(gross_revenue(s) for s in sales)
-        total_actual = sum(buyer_revenue(s) for s in sales)
-        total_expenses = sum(_sale_expenses(s) for s in sales)
-        total_ads = sum(a.spend for a in adverts)
-
-        # Get products for cost calculation
-        products_result = await db.execute(select(Product).where(Product.user_id == user_id))
-        products = {p.sku: p for p in products_result.scalars().all()}
-
-        total_cost = sum(
-            products[s.external_sku].cost_price * s.quantity
-            for s in sales if s.external_sku in products
-        )
-
-        gross = total_revenue - total_expenses
-        net = gross - total_cost
-        drr = (total_ads / total_revenue * 100) if total_revenue > 0 else Decimal(0)
-
-        # By marketplace
-        mp_data = {}
-        for shop in shops:
-            shop_sales = [s for s in sales if s.shop_id == shop.id]
-            shop_adverts = [a for a in adverts if a.shop_id == shop.id]
-            rev = sum(gross_revenue(s) for s in shop_sales)
-            exp = sum(_sale_expenses(s) for s in shop_sales)
-            cost = sum(products[s.external_sku].cost_price * s.quantity for s in shop_sales if s.external_sku in products)
-            net_mp = rev - exp - cost
-            margin = (net_mp / rev * 100) if rev > 0 else Decimal(0)
-            mp_name = {"wb": "WB", "ozon": "Ozon", "ym": "ЯМ"}.get(shop.marketplace.value, shop.marketplace.value)
-            mp_data[mp_name] = {"revenue": rev, "margin": margin}
-
-        # Top 3 products
-        product_profits: Dict[str, Decimal] = {}
-        for s in sales:
-            if s.external_sku not in products:
-                continue
-            p = products[s.external_sku]
-            profit_per_unit = gross_revenue(s) - _sale_expenses(s) - p.cost_price * (s.quantity or 0)
-            product_profits[p.name] = product_profits.get(p.name, Decimal(0)) + profit_per_unit
-
-        top_products = sorted(product_profits.items(), key=lambda x: x[1], reverse=True)[:3]
-
-        # Build message
-        date_str = today.strftime("%d.%m.%Y")
-        message = f"""📊 Отчёт за {date_str}
-
-💰 Выручка: {self._format_money(total_revenue)}
-💳 Фактическая выручка: {self._format_money(total_actual)}
-📈 Чистая прибыль: {self._format_money(net)}
-📉 ДРР: {drr:.1f}%
-
-По площадкам:
-"""
-        for mp_name, data in mp_data.items():
-            message += f"• {mp_name}: {self._format_money(data['revenue'])} | маржа {data['margin']:.0f}%\n"
-
-        if top_products:
-            message += "\nТоп-3 товара:\n"
-            for name, profit in top_products:
-                message += f"• {name[:30]}... — {self._format_money(profit)}\n"
-
-        try:
-            await self.bot.send_message(
-                chat_id=self.settings.telegram_chat_id,
-                text=message,
-                parse_mode=ParseMode.HTML if TELEGRAM_AVAILABLE else None,
-            )
-            return True
-        except Exception as e:
-            print(f"Failed to send Telegram message: {e}")
-            return False
+        by_shop: Dict[Any, Decimal] = {}
+        for t in result.scalars().all():
+            by_shop[t.shop_id] = by_shop.get(t.shop_id, Decimal(0)) + _to_decimal(t.amount)
+        return by_shop
 
     async def send_morning_report(self, db: AsyncSession, user_id: str) -> bool:
-        """Send morning report at 9:00 with yesterday's summary and alerts.
+        """Send morning report at 9:00 with yesterday's summary.
 
         Includes:
-        - Revenue, orders, returns for yesterday
-        - Net profit and margin
-        - Expenses by category
+        - Revenue (gross and actual), orders, returns for yesterday
         - Breakdown by marketplace
-        - Top 3 products by profit
-        - Low stock alerts
-        - Last sync status per shop
+        - Top 3 products by units sold
         - Current balances
         """
         if not self.bot or not self.settings.telegram_chat_id:
@@ -215,6 +123,9 @@ class TelegramBotService:
         )
         products = {p.sku: p for p in products_result.scalars().all()}
 
+        # Ozon expenses come from finance transactions, not sale columns
+        ozon_exp = await self._ozon_finance_expenses(db, shops, yesterday_start, yesterday_end)
+
         # Calculate main metrics
         total_revenue = sum(gross_revenue(s) for s in sales_no_return)
         total_actual = sum(buyer_revenue(s) for s in sales_no_return)
@@ -222,8 +133,9 @@ class TelegramBotService:
         total_orders = len(sales_no_return)
         total_units = sum(s.quantity for s in sales_no_return)
 
-        total_expenses = sum(
-            _sale_expenses(s) for s in sales_no_return
+        total_expenses = (
+            sum(_sale_expenses(s) for s in sales_no_return if s.shop_id not in ozon_exp)
+            + sum(ozon_exp.values())
         )
         total_cost = sum(
             _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
@@ -246,7 +158,11 @@ class TelegramBotService:
             mp_returns = [r for r in returns if r.shop_id == shop.id]
             rev = sum(gross_revenue(s) for s in mp_sales)
             ret = sum(gross_revenue(r) for r in mp_returns)
-            exp = sum(_sale_expenses(s) for s in mp_sales)
+            exp = (
+                ozon_exp.get(shop.id, Decimal(0))
+                if shop.id in ozon_exp
+                else sum(_sale_expenses(s) for s in mp_sales)
+            )
             cost = sum(
                 _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
                 for s in mp_sales
@@ -287,8 +203,6 @@ class TelegramBotService:
 💳 Фактическая выручка: {self._format_money(total_actual)}
 🧾 Заказов: {total_orders} ({total_units} шт)
 ↩️ Возвраты: {self._format_money(total_returns)}
-📈 Чистая прибыль: {self._format_money(net)}
-📊 Маржа: {margin:.1f}%
 
 По площадкам:
 """
@@ -298,8 +212,7 @@ class TelegramBotService:
                 message += (
                     f"• {data['name']} ({data['shop_name']}): "
                     f"{self._format_money(data['revenue'])} | "
-                    f"{data['orders']} заказов | "
-                    f"прибыль {self._format_money(data['net'])}\n"
+                    f"{data['orders']} заказов\n"
                 )
             else:
                 message += f"• {data['name']} ({data['shop_name']}): нет продаж\n"

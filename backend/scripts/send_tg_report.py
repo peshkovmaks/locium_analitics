@@ -1,4 +1,4 @@
-"""Manual test send of Telegram reports (morning + daily) to the configured chat.
+"""Manual test send of the Telegram morning report to the configured chat.
 
 Usage (from backend/):
     arch -x86_64 .venv/bin/python scripts/send_tg_report.py
@@ -39,8 +39,6 @@ async def main() -> None:
         bot = TelegramBotService()
         ok_morning = await bot.send_morning_report(db, str(user.id))
         print(f"morning report: {'sent' if ok_morning else 'FAILED'}")
-        ok_daily = await bot.send_daily_report(db, str(user.id))
-        print(f"daily report:   {'sent' if ok_daily else 'FAILED'}")
 
 
 if __name__ == "__main__":

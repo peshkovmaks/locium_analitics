@@ -302,8 +302,8 @@ class TestSendMorningReport:
         assert "Выручка" in text
         assert "Заказов" in text
         assert "Возвраты" in text
-        assert "Чистая прибыль" in text
-        assert "Маржа" in text
+        assert "Чистая прибыль" not in text
+        assert "Маржа" not in text
         assert "По площадкам" in text
         assert "WB" in text
         assert "Ozon" in text

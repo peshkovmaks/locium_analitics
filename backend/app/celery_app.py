@@ -31,10 +31,6 @@ celery_app.conf.update(
             "task": "app.tasks.sync.sync_ym_key_indicators_task",
             "schedule": crontab(hour=6, minute=13),
         },
-        "daily-report-21-00": {
-            "task": "app.tasks.sync.send_daily_report_task",
-            "schedule": crontab(hour=21, minute=0),
-        },
         "morning-report-9-00": {
             "task": "app.tasks.sync.send_morning_report_task",
             "schedule": crontab(hour=9, minute=0),
