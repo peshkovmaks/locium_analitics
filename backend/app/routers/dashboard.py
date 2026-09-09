@@ -627,13 +627,17 @@ async def get_dashboard(
 
         total_qty = sum(s.quantity or 0 for s in s_sales)
         total_revenue_sku = sum(_gross_revenue(s) for s in s_sales)
+        gross_price = (total_revenue_sku / total_qty) if total_qty > 0 else Decimal(0)
         actual_price = (sum(_buyer_revenue(s) for s in s_sales) / total_qty) if total_qty > 0 else Decimal(0)
         total_expenses_sku = sum(_sale_expenses(s) for s in s_sales)
         total_ads_sku = sum(_to_decimal(s.advertising) for s in s_sales)
 
+        # Net/margin are based on the seller's gross price (what the marketplace
+        # credits the seller, incl. marketplace-funded discounts/SPP), not on the
+        # buyer-paid amount — otherwise marketplace-funded discounts look like a loss.
         expense_per_unit = (total_expenses_sku / total_qty) if total_qty > 0 else Decimal(0)
-        net_per = actual_price - _to_decimal(p.cost_price) - expense_per_unit
-        margin = (net_per / actual_price * 100) if actual_price > 0 else Decimal(0)
+        net_per = gross_price - _to_decimal(p.cost_price) - expense_per_unit
+        margin = (net_per / gross_price * 100) if gross_price > 0 else Decimal(0)
         drr_sku = (total_ads_sku / total_revenue_sku * 100) if total_revenue_sku > 0 else Decimal(0)
 
         if p.sku not in product_unit_map:
@@ -653,6 +657,7 @@ async def get_dashboard(
             UnitEconomicsMarketplaceRow(
                 marketplace=MP_NAMES.get(mp, mp),
                 sales=total_qty,
+                gross_price=gross_price,
                 actual_price=actual_price,
                 cost=p.cost_price,
                 expense_per_unit=expense_per_unit,
