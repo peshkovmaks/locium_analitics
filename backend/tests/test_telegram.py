@@ -313,7 +313,7 @@ class TestSendMorningReport:
         assert "Балансы" in text
         assert "12 345" in text or "12345" in text
         assert "9 876" in text or "9876" in text
-        assert "не поддерживается" in text
+        assert "не поддерживается" not in text
 
     async def test_handles_empty_day(self, db_session, test_user, morning_shops):
         service = TelegramBotService()

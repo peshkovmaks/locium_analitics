@@ -224,6 +224,9 @@ class TelegramBotService:
 
         message += "\n💳 Балансы:\n"
         for shop in shops:
+            # YM balance is not supported/meaningful — skip it
+            if shop.marketplace.value == "ym":
+                continue
             b = balances.get(shop.id)
             mp = mp_names.get(shop.marketplace.value, shop.marketplace.value)
             if not b or b.is_supported is False:
