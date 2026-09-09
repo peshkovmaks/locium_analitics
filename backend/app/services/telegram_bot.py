@@ -8,6 +8,12 @@ from sqlalchemy import select, func
 
 from app.models import User, Shop, Sale, Stock, Product, Advert, SyncLog, ShopBalance
 from app.config import get_settings
+from app.services.metrics import (
+    to_decimal as _to_decimal,
+    sale_expenses as _sale_expenses,
+    gross_revenue,
+    buyer_revenue,
+)
 
 # Try to import telegram bot, but don't fail if not installed
 try:
@@ -18,21 +24,9 @@ except ImportError:
     TELEGRAM_AVAILABLE = False
 
 
-def _to_decimal(value) -> Decimal:
-    return Decimal(str(value or 0))
-
-
-def _sale_expenses(s: Sale) -> Decimal:
-    return (
-        _to_decimal(s.commission)
-        + _to_decimal(s.logistics)
-        + _to_decimal(s.storage)
-        + _to_decimal(s.advertising)
-        + _to_decimal(s.returns)
-        + _to_decimal(s.insurance)
-        + _to_decimal(s.acquiring)
-        + _to_decimal(s.other)
-    )
+# In-memory alert throttle: (alert_type, sku, marketplace) -> last sent time.
+# Prevents hourly Celery checks from re-sending the same alert every run.
+_alert_throttle: Dict[tuple, datetime] = {}
 
 
 class TelegramBotService:
@@ -42,6 +36,17 @@ class TelegramBotService:
         self.bot: Optional[Any] = None
         if TELEGRAM_AVAILABLE and self.settings.telegram_bot_token:
             self.bot = Bot(token=self.settings.telegram_bot_token)
+
+    @staticmethod
+    def _throttle(alert_type: str, sku: str, marketplace: str, hours: int = 6) -> bool:
+        """Return True if the alert may be sent; suppress repeats within `hours`."""
+        key = (alert_type, sku, marketplace)
+        now = datetime.utcnow()
+        last = _alert_throttle.get(key)
+        if last and now - last < timedelta(hours=hours):
+            return False
+        _alert_throttle[key] = now
+        return True
 
     async def send_daily_report(self, db: AsyncSession, user_id: str) -> bool:
         """Send daily report to user at 21:00.
@@ -83,8 +88,9 @@ class TelegramBotService:
         adverts = adverts_result.scalars().all()
 
         # Calculate metrics
-        total_revenue = sum(s.revenue for s in sales)
-        total_expenses = sum(s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other for s in sales)
+        total_revenue = sum(gross_revenue(s) for s in sales)
+        total_actual = sum(buyer_revenue(s) for s in sales)
+        total_expenses = sum(_sale_expenses(s) for s in sales)
         total_ads = sum(a.spend for a in adverts)
 
         # Get products for cost calculation
@@ -105,8 +111,8 @@ class TelegramBotService:
         for shop in shops:
             shop_sales = [s for s in sales if s.shop_id == shop.id]
             shop_adverts = [a for a in adverts if a.shop_id == shop.id]
-            rev = sum(s.revenue for s in shop_sales)
-            exp = sum(s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other for s in shop_sales)
+            rev = sum(gross_revenue(s) for s in shop_sales)
+            exp = sum(_sale_expenses(s) for s in shop_sales)
             cost = sum(products[s.external_sku].cost_price * s.quantity for s in shop_sales if s.external_sku in products)
             net_mp = rev - exp - cost
             margin = (net_mp / rev * 100) if rev > 0 else Decimal(0)
@@ -119,9 +125,8 @@ class TelegramBotService:
             if s.external_sku not in products:
                 continue
             p = products[s.external_sku]
-            profit_per_unit = s.revenue - (s.commission + s.logistics + s.storage + s.advertising + s.returns + s.other) - p.cost_price
-            total_profit = profit_per_unit * s.quantity
-            product_profits[p.name] = product_profits.get(p.name, Decimal(0)) + total_profit
+            profit_per_unit = gross_revenue(s) - _sale_expenses(s) - p.cost_price * (s.quantity or 0)
+            product_profits[p.name] = product_profits.get(p.name, Decimal(0)) + profit_per_unit
 
         top_products = sorted(product_profits.items(), key=lambda x: x[1], reverse=True)[:3]
 
@@ -130,6 +135,7 @@ class TelegramBotService:
         message = f"""📊 Отчёт за {date_str}
 
 💰 Выручка: {self._format_money(total_revenue)}
+💳 Фактическая выручка: {self._format_money(total_actual)}
 📈 Чистая прибыль: {self._format_money(net)}
 📉 ДРР: {drr:.1f}%
 
@@ -210,8 +216,9 @@ class TelegramBotService:
         products = {p.sku: p for p in products_result.scalars().all()}
 
         # Calculate main metrics
-        total_revenue = sum(_to_decimal(s.revenue) for s in sales_no_return)
-        total_returns = sum(_to_decimal(r.revenue) for r in returns)
+        total_revenue = sum(gross_revenue(s) for s in sales_no_return)
+        total_actual = sum(buyer_revenue(s) for s in sales_no_return)
+        total_returns = sum(gross_revenue(r) for r in returns)
         total_orders = len(sales_no_return)
         total_units = sum(s.quantity for s in sales_no_return)
 
@@ -227,18 +234,6 @@ class TelegramBotService:
         net = gross - total_cost
         margin = (net / total_revenue * 100) if total_revenue > 0 else Decimal(0)
 
-        # Expenses by category
-        expense_categories = {
-            "Комиссия": sum(_to_decimal(s.commission) for s in sales_no_return),
-            "Логистика": sum(_to_decimal(s.logistics) for s in sales_no_return),
-            "Хранение": sum(_to_decimal(s.storage) for s in sales_no_return),
-            "Реклама": sum(_to_decimal(s.advertising) for s in sales_no_return),
-            "Возвраты": sum(_to_decimal(s.returns) for s in sales_no_return),
-            "Страховка": sum(_to_decimal(s.insurance) for s in sales_no_return),
-            "Эквайринг": sum(_to_decimal(s.acquiring) for s in sales_no_return),
-            "Прочее": sum(_to_decimal(s.other) for s in sales_no_return),
-        }
-
         # By marketplace
         mp_names = {
             "wb": "WB",
@@ -249,8 +244,8 @@ class TelegramBotService:
         for shop in shops:
             mp_sales = [s for s in sales_no_return if s.shop_id == shop.id]
             mp_returns = [r for r in returns if r.shop_id == shop.id]
-            rev = sum(_to_decimal(s.revenue) for s in mp_sales)
-            ret = sum(_to_decimal(r.revenue) for r in mp_returns)
+            rev = sum(gross_revenue(s) for s in mp_sales)
+            ret = sum(gross_revenue(r) for r in mp_returns)
             exp = sum(_sale_expenses(s) for s in mp_sales)
             cost = sum(
                 _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
@@ -267,68 +262,16 @@ class TelegramBotService:
                 "net": net_mp,
             }
 
-        # Top 3 products by profit
-        product_profits: Dict[str, Decimal] = {}
+        # Top 3 products by units sold
+        product_units: Dict[str, int] = {}
         for s in sales_no_return:
-            if s.external_sku not in products:
-                continue
-            p = products[s.external_sku]
-            sale_profit = (
-                _to_decimal(s.revenue)
-                - _sale_expenses(s)
-                - (_to_decimal(p.cost_price) * (s.quantity or 0))
-            )
-            product_profits[p.name] = product_profits.get(p.name, Decimal(0)) + sale_profit
+            p = products.get(s.external_sku)
+            name = p.name if p else s.external_sku
+            product_units[name] = product_units.get(name, 0) + (s.quantity or 0)
 
         top_products = sorted(
-            product_profits.items(), key=lambda x: x[1], reverse=True
+            product_units.items(), key=lambda x: x[1], reverse=True
         )[:3]
-
-        # Low stock alerts (sum quantity per external_sku across warehouses)
-        stocks_result = await db.execute(
-            select(Stock).where(Stock.shop_id.in_(shop_ids))
-        )
-        stocks = stocks_result.scalars().all()
-        stock_by_sku: Dict[tuple, int] = {}
-        for st in stocks:
-            key = (st.shop_id, st.external_sku)
-            stock_by_sku[key] = stock_by_sku.get(key, 0) + (st.quantity or 0)
-
-        # Build product name mapping for stock alerts
-        from app.models import ShopProduct
-        shop_products_result = await db.execute(
-            select(ShopProduct).where(ShopProduct.shop_id.in_(shop_ids))
-        )
-        shop_products = shop_products_result.scalars().all()
-        sp_to_product = {}
-        for sp in shop_products:
-            if sp.product_id:
-                product_by_id = next(
-                    (p for p in products.values() if p.id == sp.product_id), None
-                )
-                if product_by_id:
-                    sp_to_product[(sp.shop_id, sp.external_sku)] = product_by_id
-
-        # If ShopProduct mapping is empty, use external_sku directly
-        low_stock_alerts = []
-        for (shop_id, external_sku), qty in stock_by_sku.items():
-            if qty < 10:
-                product = sp_to_product.get((shop_id, external_sku))
-                shop = next((sh for sh in shops if sh.id == shop_id), None)
-                name = product.name if product else external_sku
-                mp = mp_names.get(shop.marketplace.value, shop.marketplace.value) if shop else "?"
-                low_stock_alerts.append((name, mp, qty))
-
-        # Last sync status per shop
-        sync_logs_result = await db.execute(
-            select(SyncLog).where(SyncLog.shop_id.in_(shop_ids))
-        )
-        all_sync_logs = sync_logs_result.scalars().all()
-        latest_sync: Dict[str, SyncLog] = {}
-        for log in all_sync_logs:
-            sid = str(log.shop_id)
-            if sid not in latest_sync or log.created_at > latest_sync[sid].created_at:
-                latest_sync[sid] = log
 
         # Current balances
         balances_result = await db.execute(
@@ -341,18 +284,14 @@ class TelegramBotService:
         message = f"""☀️ Доброе утро! Отчёт за {date_str}
 
 💰 Выручка: {self._format_money(total_revenue)}
+💳 Фактическая выручка: {self._format_money(total_actual)}
 🧾 Заказов: {total_orders} ({total_units} шт)
 ↩️ Возвраты: {self._format_money(total_returns)}
 📈 Чистая прибыль: {self._format_money(net)}
 📊 Маржа: {margin:.1f}%
 
-Расходы:
+По площадкам:
 """
-        for cat, amount in expense_categories.items():
-            if amount > 0:
-                message += f"• {cat}: {self._format_money(amount)}\n"
-
-        message += "\nПо площадкам:\n"
         for shop in shops:
             data = mp_data.get(shop.id, {})
             if data.get("revenue", 0) > 0 or data.get("orders", 0) > 0:
@@ -366,14 +305,9 @@ class TelegramBotService:
                 message += f"• {data['name']} ({data['shop_name']}): нет продаж\n"
 
         if top_products:
-            message += "\n🏆 Топ-3 товара по прибыли:\n"
-            for name, profit in top_products:
-                message += f"• {name[:30]} — {self._format_money(profit)}\n"
-
-        if low_stock_alerts:
-            message += "\n⚠️ Низкий остаток (< 10 шт):\n"
-            for name, mp, qty in low_stock_alerts[:10]:
-                message += f"• {name[:30]} ({mp}): {qty} шт\n"
+            message += "\n🏆 Топ-3 товара по количеству:\n"
+            for name, units in top_products:
+                message += f"• {name[:30]} — {units} шт\n"
 
         message += "\n💳 Балансы:\n"
         for shop in shops:
@@ -383,22 +317,6 @@ class TelegramBotService:
                 message += f"• {mp} ({shop.name}): не поддерживается\n"
             else:
                 message += f"• {mp} ({shop.name}): {self._format_money(b.balance)}\n"
-
-        message += "\n🔄 Последняя синхронизация:\n"
-        for shop in shops:
-            log = latest_sync.get(str(shop.id))
-            mp = mp_names.get(shop.marketplace.value, shop.marketplace.value)
-            if log:
-                status_emoji = {
-                    "success": "✅",
-                    "error": "❌",
-                    "rate_limited": "⏳",
-                    "skipped": "⏭️",
-                }.get(log.status, "⚠️")
-                time_str = log.created_at.strftime("%d.%m %H:%M")
-                message += f"• {mp} ({shop.name}): {status_emoji} {log.status} ({time_str})\n"
-            else:
-                message += f"• {mp} ({shop.name}): ⚠️ нет данных\n"
 
         try:
             await self.bot.send_message(
@@ -414,6 +332,8 @@ class TelegramBotService:
     async def send_price_alert(self, sku: str, name: str, marketplace: str, current_price: Decimal, min_price: Decimal) -> bool:
         """Send alert when price drops below minimum."""
         if not self.bot or not self.settings.telegram_chat_id:
+            return False
+        if not self._throttle("price", sku, marketplace):
             return False
 
         message = f"""🚨 Алерт: Цена ниже минимальной!
@@ -436,6 +356,8 @@ class TelegramBotService:
         """Send alert when DRR exceeds threshold."""
         if not self.bot or not self.settings.telegram_chat_id:
             return False
+        if not self._throttle("drr", sku, "all"):
+            return False
 
         message = f"""⚠️ Алерт: Высокий ДРР!
 
@@ -454,6 +376,8 @@ class TelegramBotService:
     async def send_stock_alert(self, sku: str, name: str, marketplace: str, stock: int) -> bool:
         """Send alert when stock is low."""
         if not self.bot or not self.settings.telegram_chat_id:
+            return False
+        if not self._throttle("stock", sku, marketplace):
             return False
 
         message = f"""⚠️ Алерт: Низкий остаток!

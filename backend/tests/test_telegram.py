@@ -304,22 +304,16 @@ class TestSendMorningReport:
         assert "Возвраты" in text
         assert "Чистая прибыль" in text
         assert "Маржа" in text
-        assert "Расходы" in text
         assert "По площадкам" in text
         assert "WB" in text
         assert "Ozon" in text
         assert "ЯМ" in text
-        assert "Топ-3 товара" in text
+        assert "Топ-3 товара по количеству" in text
         assert "Product One" in text
-        assert "Низкий остаток" in text
         assert "Балансы" in text
         assert "12 345" in text or "12345" in text
         assert "9 876" in text or "9876" in text
         assert "не поддерживается" in text
-        assert "Последняя синхронизация" in text
-        assert "success" in text
-        assert "error" in text
-        assert "skipped" in text
 
     async def test_handles_empty_day(self, db_session, test_user, morning_shops):
         service = TelegramBotService()

@@ -22,6 +22,13 @@ from app.schemas import (
     DailyTrendRow,
 )
 from app.auth import get_current_user
+from app.services.metrics import (
+    to_decimal as _to_decimal,
+    sale_expenses as _sale_expenses,
+    gross_revenue as _gross_revenue,
+    buyer_revenue as _buyer_revenue,
+    actual_revenue as _actual_revenue,
+)
 
 router = APIRouter()
 
@@ -60,48 +67,6 @@ ALERT_THRESHOLDS = {
     "max_drr": Decimal("12"),     # %
     "min_stock": 10,              # шт
 }
-
-
-def _to_decimal(value) -> Decimal:
-    return Decimal(str(value or 0))
-
-
-def _sale_expenses(s: Sale) -> Decimal:
-    return (
-        max(_to_decimal(s.commission), Decimal(0))
-        + max(_to_decimal(s.logistics), Decimal(0))
-        + max(_to_decimal(s.storage), Decimal(0))
-        + max(_to_decimal(s.advertising), Decimal(0))
-        + max(_to_decimal(s.returns), Decimal(0))
-        + max(_to_decimal(s.insurance), Decimal(0))
-        + max(_to_decimal(s.acquiring), Decimal(0))
-        + max(_to_decimal(s.other), Decimal(0))
-    )
-
-
-def _gross_revenue(s: Sale) -> Decimal:
-    """Order amount including marketplace discount/СПП/bonus compensation —
-    the money the seller actually receives."""
-    cp = _to_decimal(s.customer_price)
-    if cp > 0:
-        return (
-            min(_to_decimal(s.price), cp) * (s.quantity or 0)
-            + _to_decimal(s.marketplace_discount)
-        )
-    return _to_decimal(s.revenue) + _to_decimal(s.marketplace_discount)
-
-
-def _buyer_revenue(s: Sale) -> Decimal:
-    """Amount actually paid by the customer."""
-    cp = _to_decimal(s.customer_price)
-    if cp > 0:
-        return cp * (s.quantity or 0)
-    return _to_decimal(s.revenue)
-
-
-def _actual_revenue(s: Sale) -> Decimal:
-    """Actually paid by the customer (alias of _buyer_revenue)."""
-    return _buyer_revenue(s)
 
 
 def _shop_expenses(
@@ -313,21 +278,6 @@ async def get_dashboard(
     stocks_result = await db.execute(select(Stock).where(Stock.shop_id.in_(shop_ids)))
     stocks = stocks_result.scalars().all()
 
-    def _to_decimal(value) -> Decimal:
-        return Decimal(str(value or 0))
-
-    def _sale_expenses(s: Sale) -> Decimal:
-        return (
-            max(_to_decimal(s.commission), Decimal(0))
-            + max(_to_decimal(s.logistics), Decimal(0))
-            + max(_to_decimal(s.storage), Decimal(0))
-            + max(_to_decimal(s.advertising), Decimal(0))
-            + max(_to_decimal(s.returns), Decimal(0))
-            + max(_to_decimal(s.insurance), Decimal(0))
-            + max(_to_decimal(s.acquiring), Decimal(0))
-            + max(_to_decimal(s.other), Decimal(0))
-        )
-
     def _shop_expenses_from_sales(shop_id) -> Decimal:
         mp_sales = [s for s in sales if s.shop_id == shop_id]
         mp_returns = [r for r in returns if r.shop_id == shop_id]
@@ -355,28 +305,6 @@ async def get_dashboard(
                 if t.shop_id == shop_id and t.category == "advertising"
             )
         return _shop_ads_from_sales(shop_id)
-
-    def _gross_revenue(s: Sale) -> Decimal:
-        """Order amount including marketplace discount/СПП/bonus compensation —
-        the money the seller actually receives."""
-        cp = _to_decimal(s.customer_price)
-        if cp > 0:
-            return (
-                min(_to_decimal(s.price), cp) * (s.quantity or 0)
-                + _to_decimal(s.marketplace_discount)
-            )
-        return _to_decimal(s.revenue) + _to_decimal(s.marketplace_discount)
-
-    def _buyer_revenue(s: Sale) -> Decimal:
-        """Amount actually paid by the customer."""
-        cp = _to_decimal(s.customer_price)
-        if cp > 0:
-            return cp * (s.quantity or 0)
-        return _to_decimal(s.revenue)
-
-    def _actual_revenue(s: Sale) -> Decimal:
-        """Actually paid by the customer (alias of _buyer_revenue)."""
-        return _buyer_revenue(s)
 
     # Calculate KPIs for the current period
     current = _calc_period_kpis(sales, returns, finance_transactions, adverts, shops, products)
