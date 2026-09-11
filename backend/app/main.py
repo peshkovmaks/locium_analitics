@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 import os
 
 from app.database import Base, get_engine
-from app.routers import auth, dashboard, shops, products, balances
+from app.routers import auth, dashboard, shops, products, balances, reports
 
 app = FastAPI(
     title="Marketplace Analytics API",
@@ -26,6 +26,7 @@ app.include_router(shops.router, prefix="/api/v1/shops", tags=["shops"])
 app.include_router(balances.router, prefix="/api/v1/balances", tags=["balances"])
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(products.router, prefix="/api/v1", tags=["products"])
+app.include_router(reports.router, prefix="/api/v1/reports", tags=["reports"])
 
 
 @app.on_event("startup")

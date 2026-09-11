@@ -14,8 +14,16 @@ from sqlalchemy.orm import selectinload
 from app.adapters.base import AdapterFactory
 from app.adapters.wildberries import RateLimitExceeded
 from app.models import (
-    Shop, Sale, Stock, Advert, Product, ProductShopMapping, SyncLog, ShopBalance,
-    FinanceTransaction, Marketplace,
+    Shop,
+    Sale,
+    Stock,
+    Advert,
+    Product,
+    ProductShopMapping,
+    SyncLog,
+    ShopBalance,
+    FinanceTransaction,
+    Marketplace,
 )
 
 
@@ -107,18 +115,30 @@ class SyncService:
         try:
             # 1. Sync sales — prefer real-time orders over delayed analytics.
             try:
-                if hasattr(adapter, 'get_orders'):
+                if hasattr(adapter, "get_orders"):
                     orders = await adapter.get_orders(date_from, date_to)
                     await self._save_orders_as_sales(shop.id, orders)
                     all_items.extend(orders)
-                    results["orders"] = {"status": "success", "count": len(orders), "message": None}
+                    results["orders"] = {
+                        "status": "success",
+                        "count": len(orders),
+                        "message": None,
+                    }
                 else:
                     sales = await adapter.get_sales(date_from, date_to)
                     await self._save_sales(shop.id, sales)
                     all_items.extend(sales)
-                    results["orders"] = {"status": "success", "count": len(sales), "message": None}
+                    results["orders"] = {
+                        "status": "success",
+                        "count": len(sales),
+                        "message": None,
+                    }
             except RateLimitExceeded as e:
-                results["orders"] = {"status": "rate_limited", "count": 0, "message": str(e)}
+                results["orders"] = {
+                    "status": "rate_limited",
+                    "count": 0,
+                    "message": str(e),
+                }
             except Exception as e:
                 results["orders"] = {"status": "error", "count": 0, "message": str(e)}
 
@@ -129,9 +149,17 @@ class SyncService:
                 await self._save_stocks(shop.id, stocks)
                 # Do not enrich products from stocks: WB warehouse_remains uses
                 # nmId, which differs from the supplierArticle used by orders.
-                results["stocks"] = {"status": "success", "count": len(stocks), "message": None}
+                results["stocks"] = {
+                    "status": "success",
+                    "count": len(stocks),
+                    "message": None,
+                }
             except RateLimitExceeded as e:
-                results["stocks"] = {"status": "rate_limited", "count": 0, "message": str(e)}
+                results["stocks"] = {
+                    "status": "rate_limited",
+                    "count": 0,
+                    "message": str(e),
+                }
             except Exception as e:
                 results["stocks"] = {"status": "error", "count": 0, "message": str(e)}
 
@@ -140,10 +168,20 @@ class SyncService:
                 await self._clear_adverts(shop.id, date_from, date_to)
                 adverts = await adapter.get_adverts(date_from, date_to)
                 await self._save_adverts(shop.id, adverts)
-                await self._distribute_advert_spend(shop.id, adverts, date_from, date_to)
-                results["adverts"] = {"status": "success", "count": len(adverts), "message": None}
+                await self._distribute_advert_spend(
+                    shop.id, adverts, date_from, date_to
+                )
+                results["adverts"] = {
+                    "status": "success",
+                    "count": len(adverts),
+                    "message": None,
+                }
             except RateLimitExceeded as e:
-                results["adverts"] = {"status": "rate_limited", "count": 0, "message": str(e)}
+                results["adverts"] = {
+                    "status": "rate_limited",
+                    "count": 0,
+                    "message": str(e),
+                }
             except Exception as e:
                 results["adverts"] = {"status": "error", "count": 0, "message": str(e)}
 
@@ -151,9 +189,17 @@ class SyncService:
             try:
                 prices = await adapter.get_prices()
                 all_items.extend(prices)
-                results["prices"] = {"status": "success", "count": len(prices), "message": None}
+                results["prices"] = {
+                    "status": "success",
+                    "count": len(prices),
+                    "message": None,
+                }
             except RateLimitExceeded as e:
-                results["prices"] = {"status": "rate_limited", "count": 0, "message": str(e)}
+                results["prices"] = {
+                    "status": "rate_limited",
+                    "count": 0,
+                    "message": str(e),
+                }
             except Exception as e:
                 results["prices"] = {"status": "error", "count": 0, "message": str(e)}
 
@@ -177,19 +223,41 @@ class SyncService:
                 try:
                     finance = await adapter.get_finance_report(date_from, date_to)
                     if finance:
-                        await self._update_finance_data(shop.id, finance, date_from, date_to)
+                        await self._update_finance_data(
+                            shop.id, finance, date_from, date_to
+                        )
                         await self._save_finance_transactions(
                             shop.id, shop.marketplace, finance, date_from, date_to
                         )
-                        results["finance"] = {"status": "success", "count": len(finance), "message": None}
+                        results["finance"] = {
+                            "status": "success",
+                            "count": len(finance),
+                            "message": None,
+                        }
                     else:
-                        results["finance"] = {"status": "success", "count": 0, "message": "No finance data"}
+                        results["finance"] = {
+                            "status": "success",
+                            "count": 0,
+                            "message": "No finance data",
+                        }
                 except RateLimitExceeded as e:
-                    results["finance"] = {"status": "rate_limited", "count": 0, "message": str(e)}
+                    results["finance"] = {
+                        "status": "rate_limited",
+                        "count": 0,
+                        "message": str(e),
+                    }
                 except Exception as e:
-                    results["finance"] = {"status": "error", "count": 0, "message": str(e)}
+                    results["finance"] = {
+                        "status": "error",
+                        "count": 0,
+                        "message": str(e),
+                    }
             else:
-                results["finance"] = {"status": "skipped", "count": 0, "message": "Finance sync disabled"}
+                results["finance"] = {
+                    "status": "skipped",
+                    "count": 0,
+                    "message": "Finance sync disabled",
+                }
 
             shop.last_sync_at = datetime.utcnow()
             await self.db.commit()
@@ -205,8 +273,10 @@ class SyncService:
                 shop_id=shop.id,
                 status=results["status"],
                 sections={
-                    k: v for k, v in results.items()
-                    if k in ("orders", "stocks", "adverts", "prices", "finance", "balance")
+                    k: v
+                    for k, v in results.items()
+                    if k
+                    in ("orders", "stocks", "adverts", "prices", "finance", "balance")
                 },
                 message=results.get("message"),
             )
@@ -271,7 +341,9 @@ class SyncService:
             quantity = int(item.get("quantity", 1) or 1)
             price = Decimal(str(item.get("price", 0) or 0))
             customer_price = Decimal(str(item.get("customer_price", price) or price))
-            marketplace_discount = Decimal(str(item.get("marketplace_discount", 0) or 0))
+            marketplace_discount = Decimal(
+                str(item.get("marketplace_discount", 0) or 0)
+            )
             revenue = Decimal(str(item.get("revenue", price * quantity)))
             is_return = bool(item.get("is_return", False))
 
@@ -342,27 +414,36 @@ class SyncService:
             if not is_return:
                 status = str(item.get("status", "")).upper()
                 is_return = status in (
-                    "CANCELLED", "CANCELLED_BY_CUSTOMER", "RETURNED", "PARTIALLY_RETURNED"
+                    "CANCELLED",
+                    "CANCELLED_BY_CUSTOMER",
+                    "RETURNED",
+                    "PARTIALLY_RETURNED",
                 )
-            sales.append({
-                "date": item["date"],
-                "external_sku": item["external_sku"],
-                "external_id": item.get("external_id"),
-                "quantity": item.get("quantity", 1),
-                "price": item["price"],
-                "customer_price": item.get("customer_price", item["price"]),
-                "marketplace_discount": item.get("marketplace_discount", Decimal("0")),
-                "revenue": item.get("revenue", item["price"] * item.get("quantity", 1)),
-                "commission": Decimal(str(item.get("commission", 0) or 0)),
-                "logistics": Decimal(str(item.get("logistics", 0) or 0)),
-                "storage": Decimal(str(item.get("storage", 0) or 0)),
-                "advertising": Decimal(str(item.get("advertising", 0) or 0)),
-                "returns": Decimal(str(item.get("returns", 0) or 0)),
-                "insurance": Decimal(str(item.get("insurance", 0) or 0)),
-                "acquiring": Decimal(str(item.get("acquiring", 0) or 0)),
-                "other": Decimal(str(item.get("other", 0) or 0)),
-                "is_return": is_return,
-            })
+            sales.append(
+                {
+                    "date": item["date"],
+                    "external_sku": item["external_sku"],
+                    "external_id": item.get("external_id"),
+                    "quantity": item.get("quantity", 1),
+                    "price": item["price"],
+                    "customer_price": item.get("customer_price", item["price"]),
+                    "marketplace_discount": item.get(
+                        "marketplace_discount", Decimal("0")
+                    ),
+                    "revenue": item.get(
+                        "revenue", item["price"] * item.get("quantity", 1)
+                    ),
+                    "commission": Decimal(str(item.get("commission", 0) or 0)),
+                    "logistics": Decimal(str(item.get("logistics", 0) or 0)),
+                    "storage": Decimal(str(item.get("storage", 0) or 0)),
+                    "advertising": Decimal(str(item.get("advertising", 0) or 0)),
+                    "returns": Decimal(str(item.get("returns", 0) or 0)),
+                    "insurance": Decimal(str(item.get("insurance", 0) or 0)),
+                    "acquiring": Decimal(str(item.get("acquiring", 0) or 0)),
+                    "other": Decimal(str(item.get("other", 0) or 0)),
+                    "is_return": is_return,
+                }
+            )
         await self._upsert_sales(shop_id, sales)
 
     async def _save_stocks(self, shop_id, stocks: List[Dict[str, Any]]):
@@ -396,7 +477,11 @@ class SyncService:
             self.db.add(advert)
 
     async def _distribute_advert_spend(
-        self, shop_id, adverts: List[Dict[str, Any]], date_from: datetime, date_to: datetime
+        self,
+        shop_id,
+        adverts: List[Dict[str, Any]],
+        date_from: datetime,
+        date_to: datetime,
     ):
         """Distribute advert spend onto matching Sale.advertising for DRR.
 
@@ -467,7 +552,9 @@ class SyncService:
                 for sale in sales:
                     sale.advertising += per_sale
 
-    async def _ensure_products(self, shop: Shop, items, names: Dict[str, str] | None = None):
+    async def _ensure_products(
+        self, shop: Shop, items, names: Dict[str, str] | None = None
+    ):
         """Create Product records for new SKUs with shop mappings.
 
         Prefers real names from sales/orders over bare SKUs coming from prices.
@@ -512,7 +599,11 @@ class SyncService:
             mapping = mapping_result.scalar_one_or_none()
 
             if mapping:
-                if has_real_name and mapping.product and mapping.product.name != raw_name:
+                if (
+                    has_real_name
+                    and mapping.product
+                    and mapping.product.name != raw_name
+                ):
                     mapping.product.name = raw_name
                 continue
 
@@ -520,7 +611,8 @@ class SyncService:
             product_result = await self.db.execute(
                 select(Product).where(
                     Product.user_id == shop.user_id,
-                    (Product.canonical_sku == external_sku) | (Product.sku == external_sku),
+                    (Product.canonical_sku == external_sku)
+                    | (Product.sku == external_sku),
                 )
             )
             product = product_result.scalar_one_or_none()
@@ -564,8 +656,7 @@ class SyncService:
 
         # Only normalized transaction rows have ``category``/``amount``.
         transactions = [
-            item for item in finance
-            if "category" in item and "amount" in item
+            item for item in finance if "category" in item and "amount" in item
         ]
         if not transactions:
             return
@@ -582,7 +673,9 @@ class SyncService:
             operation_date = item.get("operation_date")
             if isinstance(operation_date, str):
                 try:
-                    operation_date = datetime.fromisoformat(operation_date.replace("Z", "+00:00"))
+                    operation_date = datetime.fromisoformat(
+                        operation_date.replace("Z", "+00:00")
+                    )
                 except (ValueError, TypeError):
                     operation_date = date_from
             if operation_date and operation_date.tzinfo:
@@ -604,7 +697,11 @@ class SyncService:
             )
 
     async def _update_finance_data(
-        self, shop_id, finance: List[Dict[str, Any]], date_from: datetime, date_to: datetime
+        self,
+        shop_id,
+        finance: List[Dict[str, Any]],
+        date_from: datetime,
+        date_to: datetime,
     ):
         """Distribute finance-level expenses across matching sales rows.
 
@@ -634,7 +731,16 @@ class SyncService:
         if not finance:
             return
 
-        EXPENSE_KEYS = ["commission", "logistics", "storage", "advertising", "returns", "insurance", "acquiring", "other"]
+        EXPENSE_KEYS = [
+            "commission",
+            "logistics",
+            "storage",
+            "advertising",
+            "returns",
+            "insurance",
+            "acquiring",
+            "other",
+        ]
 
         def _normalize(item: Dict[str, Any]) -> Dict[str, Any]:
             """Convert a transaction-style row into the legacy bucket format."""
@@ -642,7 +748,10 @@ class SyncService:
                 bucket = {k: Decimal("0") for k in EXPENSE_KEYS}
                 cat = item.get("category")
                 if cat in bucket:
-                    bucket[cat] = Decimal(str(item.get("amount", 0) or 0))
+                    amount = Decimal(str(item.get("amount", 0) or 0))
+                    # Sale expense columns stay positive; signed credits remain
+                    # in FinanceTransaction for seller-level accounting.
+                    bucket[cat] = max(-amount, Decimal("0"))
                 return {
                     "external_id": item.get("posting_number"),
                     "posting_number": item.get("posting_number"),
@@ -728,7 +837,9 @@ class SyncService:
                 sale.commission += Decimal(str(item.get("commission", 0) or 0)) * weight
                 sale.logistics += Decimal(str(item.get("logistics", 0) or 0)) * weight
                 sale.storage += Decimal(str(item.get("storage", 0) or 0)) * weight
-                sale.advertising += Decimal(str(item.get("advertising", 0) or 0)) * weight
+                sale.advertising += (
+                    Decimal(str(item.get("advertising", 0) or 0)) * weight
+                )
                 sale.returns += Decimal(str(item.get("returns", 0) or 0)) * weight
                 sale.insurance += Decimal(str(item.get("insurance", 0) or 0)) * weight
                 sale.acquiring += Decimal(str(item.get("acquiring", 0) or 0)) * weight
@@ -782,7 +893,16 @@ class SyncService:
         date_from = _naive_utc(date_from)
         date_to = _naive_utc(date_to)
 
-        EXPENSE_KEYS = ["commission", "logistics", "storage", "advertising", "returns", "insurance", "acquiring", "other"]
+        EXPENSE_KEYS = [
+            "commission",
+            "logistics",
+            "storage",
+            "advertising",
+            "returns",
+            "insurance",
+            "acquiring",
+            "other",
+        ]
 
         # Reset expenses for the whole range once.
         await self.db.execute(
@@ -904,7 +1024,8 @@ class SyncService:
             shop_result = await self.sync_shop(
                 shop,
                 days_back,
-                sync_finance=shop.marketplace not in (Marketplace.wb, Marketplace.yandex_market),
+                sync_finance=shop.marketplace
+                not in (Marketplace.wb, Marketplace.yandex_market),
             )
             results.append(shop_result)
 

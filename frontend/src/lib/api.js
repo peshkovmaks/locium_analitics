@@ -45,6 +45,30 @@ export const dashboard = {
   },
 };
 
+export const reports = {
+  preview: (payload) => api('/reports/preview', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  download: async (payload) => {
+    const res = await fetch(`${API_BASE}/reports/pdf`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify(payload),
+    });
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+      return;
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    return res.blob();
+  },
+};
+
 export const products = {
   list: () => api('/products'),
   updateCost: (sku, costPrice) =>

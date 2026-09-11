@@ -37,9 +37,8 @@ def gross_revenue(s: Sale) -> Decimal:
     the money the seller actually receives."""
     cp = to_decimal(s.customer_price)
     if cp > 0:
-        return (
-            min(to_decimal(s.price), cp) * (s.quantity or 0)
-            + to_decimal(s.marketplace_discount)
+        return min(to_decimal(s.price), cp) * (s.quantity or 0) + to_decimal(
+            s.marketplace_discount
         )
     return to_decimal(s.revenue) + to_decimal(s.marketplace_discount)
 
@@ -55,3 +54,15 @@ def buyer_revenue(s: Sale) -> Decimal:
 def actual_revenue(s: Sale) -> Decimal:
     """Actually paid by the customer (alias of buyer_revenue)."""
     return buyer_revenue(s)
+
+
+def signed_finance_amount(transaction) -> Decimal:
+    """Return a finance transaction using the current signed convention.
+
+    Legacy rows stored expenses as positive amounts. New Ozon accrual rows carry
+    ``raw_data.signed`` and preserve the API sign, including positive credits.
+    """
+    amount = to_decimal(transaction.amount)
+    if (transaction.raw_data or {}).get("signed"):
+        return amount
+    return -abs(amount)

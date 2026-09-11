@@ -8,7 +8,16 @@ from decimal import Decimal
 from fastapi import Query
 
 from app.database import get_db
-from app.models import User, Shop, Product, Sale, Stock, Advert, Marketplace, FinanceTransaction
+from app.models import (
+    User,
+    Shop,
+    Product,
+    Sale,
+    Stock,
+    Advert,
+    Marketplace,
+    FinanceTransaction,
+)
 from app.schemas import (
     DashboardData,
     KPIData,
@@ -28,6 +37,7 @@ from app.services.metrics import (
     gross_revenue as _gross_revenue,
     buyer_revenue as _buyer_revenue,
     actual_revenue as _actual_revenue,
+    signed_finance_amount as _signed_finance_amount,
 )
 
 router = APIRouter()
@@ -64,17 +74,15 @@ MP_NAMES = {"wb": "Wildberries", "ozon": "Ozon", "ym": "Яндекс Марке�
 
 ALERT_THRESHOLDS = {
     "min_margin": Decimal("15"),  # %
-    "max_drr": Decimal("12"),     # %
-    "min_stock": 10,              # шт
+    "max_drr": Decimal("12"),  # %
+    "min_stock": 10,  # шт
 }
 
 
-def _shop_expenses(
-    shop_id, mp: str, sales, returns, finance_transactions
-) -> Decimal:
+def _shop_expenses(shop_id, mp: str, sales, returns, finance_transactions) -> Decimal:
     if mp == "ozon":
         return sum(
-            _to_decimal(t.amount)
+            -_signed_finance_amount(t)
             for t in finance_transactions
             if t.shop_id == shop_id
         )
@@ -86,14 +94,16 @@ def _shop_expenses(
 def _shop_ads(shop_id, mp: str, sales, finance_transactions) -> Decimal:
     if mp == "ozon":
         return sum(
-            _to_decimal(t.amount)
+            -_signed_finance_amount(t)
             for t in finance_transactions
             if t.shop_id == shop_id and t.category == "advertising"
         )
     return sum(_to_decimal(s.advertising) for s in sales if s.shop_id == shop_id)
 
 
-def _calc_period_kpis(sales, returns, finance_transactions, adverts, shops, products) -> Dict[str, Decimal]:
+def _calc_period_kpis(
+    sales, returns, finance_transactions, adverts, shops, products
+) -> Dict[str, Decimal]:
     total_revenue = sum(_gross_revenue(s) for s in sales) - sum(
         _gross_revenue(r) for r in returns
     )
@@ -105,8 +115,7 @@ def _calc_period_kpis(sales, returns, finance_transactions, adverts, shops, prod
         for s in shops
     )
     total_ads = sum(
-        _shop_ads(s.id, s.marketplace.value, sales, finance_transactions)
-        for s in shops
+        _shop_ads(s.id, s.marketplace.value, sales, finance_transactions) for s in shops
     )
     total_gross = total_revenue - total_expenses
     total_cost = Decimal(0)
@@ -125,7 +134,9 @@ def _calc_period_kpis(sales, returns, finance_transactions, adverts, shops, prod
     }
 
 
-def _calc_order_stats(sales, returns, total_net: Optional[Decimal] = None) -> Dict[str, Decimal]:
+def _calc_order_stats(
+    sales, returns, total_net: Optional[Decimal] = None
+) -> Dict[str, Decimal]:
     """Aggregate order-level metrics for a given period."""
     unique_order_ids = {s.external_id for s in sales}
     orders_count = len(unique_order_ids)
@@ -147,15 +158,23 @@ def _calc_order_stats(sales, returns, total_net: Optional[Decimal] = None) -> Di
     returns_count = len(unique_return_ids)
     total_orders_with_returns = orders_count + returns_count
 
-    average_check = (total_actual_revenue / orders_count) if orders_count > 0 else Decimal(0)
-    average_profit_per_order = (total_net / orders_count) if orders_count > 0 else Decimal(0)
+    average_check = (
+        (total_actual_revenue / orders_count) if orders_count > 0 else Decimal(0)
+    )
+    average_profit_per_order = (
+        (total_net / orders_count) if orders_count > 0 else Decimal(0)
+    )
     profit_per_item = (total_net / total_items) if total_items > 0 else Decimal(0)
     return_rate = (
         Decimal(returns_count) / Decimal(total_orders_with_returns) * 100
         if total_orders_with_returns > 0
         else Decimal(0)
     )
-    avg_items_per_order = (Decimal(total_items) / Decimal(orders_count)) if orders_count > 0 else Decimal(0)
+    avg_items_per_order = (
+        (Decimal(total_items) / Decimal(orders_count))
+        if orders_count > 0
+        else Decimal(0)
+    )
 
     return {
         "orders_count": orders_count,
@@ -172,8 +191,14 @@ def _calc_order_stats(sales, returns, total_net: Optional[Decimal] = None) -> Di
 async def get_dashboard(
     period: str = "today",
     marketplace: str = "all",
-    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD). Overrides period if provided together with end_date."),
-    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD). Overrides period if provided together with start_date."),
+    start_date: Optional[date] = Query(
+        None,
+        description="Start date (YYYY-MM-DD). Overrides period if provided together with end_date.",
+    ),
+    end_date: Optional[date] = Query(
+        None,
+        description="End date (YYYY-MM-DD). Overrides period if provided together with start_date.",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -291,7 +316,7 @@ async def get_dashboard(
     def _shop_expenses(shop_id, mp: str) -> Decimal:
         if mp == "ozon":
             return sum(
-                _to_decimal(t.amount)
+                -_signed_finance_amount(t)
                 for t in finance_transactions
                 if t.shop_id == shop_id
             )
@@ -300,19 +325,23 @@ async def get_dashboard(
     def _shop_ads(shop_id, mp: str) -> Decimal:
         if mp == "ozon":
             return sum(
-                _to_decimal(t.amount)
+                -_signed_finance_amount(t)
                 for t in finance_transactions
                 if t.shop_id == shop_id and t.category == "advertising"
             )
         return _shop_ads_from_sales(shop_id)
 
     # Calculate KPIs for the current period
-    current = _calc_period_kpis(sales, returns, finance_transactions, adverts, shops, products)
+    current = _calc_period_kpis(
+        sales, returns, finance_transactions, adverts, shops, products
+    )
     total_revenue = current["revenue"]
     total_actual_revenue = current["actual_revenue"]
     total_gross = current["gross"]
     total_net = current["net"]
     drr = current["drr"]
+
+    official_ozon = None
 
     # Calculate real WoW: previous period of the same length
     delta = end_dt - start_dt
@@ -378,6 +407,38 @@ async def get_dashboard(
 
     # Order-level stats for current and previous periods
     current_order_stats = _calc_order_stats(sales, returns, current["net"])
+    if official_ozon:
+        current_order_stats.update(
+            orders_count=official_ozon["orders"],
+            average_check=(
+                official_ozon["actual_revenue"] / official_ozon["orders"]
+                if official_ozon["orders"]
+                else Decimal(0)
+            ),
+            returns_count=official_ozon["returns"],
+            avg_items_per_order=(
+                Decimal(official_ozon["items"]) / official_ozon["orders"]
+                if official_ozon["orders"]
+                else Decimal(0)
+            ),
+            average_profit_per_order=(
+                official_ozon["net_profit"] / official_ozon["orders"]
+                if official_ozon["orders"]
+                else Decimal(0)
+            ),
+            profit_per_item=(
+                official_ozon["net_profit"] / official_ozon["items"]
+                if official_ozon["items"]
+                else Decimal(0)
+            ),
+            return_rate=(
+                Decimal(official_ozon["returns"])
+                / Decimal(official_ozon["orders"] + official_ozon["returns"])
+                * 100
+                if official_ozon["orders"] + official_ozon["returns"]
+                else Decimal(0)
+            ),
+        )
     previous_order_stats = _calc_order_stats(prev_sales, prev_returns, previous["net"])
 
     def _wow_order(cur: Decimal, prev: Decimal) -> float:
@@ -459,16 +520,22 @@ async def get_dashboard(
         day_returns = returns_by_day.get(day, [])
         day_adverts = adverts_by_day.get(day, [])
 
-        day_revenue = sum(_gross_revenue(s) for s in day_sales) - sum(_gross_revenue(r) for r in day_returns)
-        day_actual_revenue = sum(_actual_revenue(s) for s in day_sales) - sum(_actual_revenue(r) for r in day_returns)
+        day_revenue = sum(_gross_revenue(s) for s in day_sales) - sum(
+            _gross_revenue(r) for r in day_returns
+        )
+        day_actual_revenue = sum(_actual_revenue(s) for s in day_sales) - sum(
+            _actual_revenue(r) for r in day_returns
+        )
         day_expenses = Decimal("0")
         day_ads = Decimal("0")
         for shop in shops:
             if shop.marketplace == Marketplace.ozon:
-                day_txs = [t for t in finance_by_day.get(day, []) if t.shop_id == shop.id]
-                day_expenses += sum(_to_decimal(t.amount) for t in day_txs)
+                day_txs = [
+                    t for t in finance_by_day.get(day, []) if t.shop_id == shop.id
+                ]
+                day_expenses += sum(-_signed_finance_amount(t) for t in day_txs)
                 day_ads += sum(
-                    _to_decimal(t.amount)
+                    -_signed_finance_amount(t)
                     for t in day_txs
                     if t.category == "advertising"
                 )
@@ -501,7 +568,9 @@ async def get_dashboard(
 
         orders_count_trend.append(day_orders_count)
         average_check_trend.append(
-            float(day_actual_revenue / day_orders_count) if day_orders_count > 0 else 0.0
+            float(day_actual_revenue / day_orders_count)
+            if day_orders_count > 0
+            else 0.0
         )
         average_profit_per_order_trend.append(
             float(day_net / day_orders_count) if day_orders_count > 0 else 0.0
@@ -511,7 +580,9 @@ async def get_dashboard(
         )
         returns_count_trend.append(len(day_unique_returns))
         avg_items_per_order_trend.append(
-            float(Decimal(day_items) / Decimal(day_orders_count)) if day_orders_count > 0 else 0.0
+            float(Decimal(day_items) / Decimal(day_orders_count))
+            if day_orders_count > 0
+            else 0.0
         )
 
     # Calculate KPI breakdown by marketplace
@@ -522,8 +593,12 @@ async def get_dashboard(
         mp_returns = [r for r in returns if r.shop_id == shop.id]
         mp_adverts = [a for a in adverts if a.shop_id == shop.id]
 
-        mp_revenue = sum(_gross_revenue(s) for s in mp_sales) - sum(_gross_revenue(r) for r in mp_returns)
-        mp_actual_revenue = sum(_actual_revenue(s) for s in mp_sales) - sum(_actual_revenue(r) for r in mp_returns)
+        mp_revenue = sum(_gross_revenue(s) for s in mp_sales) - sum(
+            _gross_revenue(r) for r in mp_returns
+        )
+        mp_actual_revenue = sum(_actual_revenue(s) for s in mp_sales) - sum(
+            _actual_revenue(r) for r in mp_returns
+        )
         mp_expenses = _shop_expenses(shop.id, mp)
         mp_ads = _shop_ads(shop.id, mp)
         mp_gross = mp_revenue - mp_expenses
@@ -546,6 +621,19 @@ async def get_dashboard(
                 drr=mp_drr,
             )
         )
+
+    if official_ozon:
+        kpi_by_marketplace = [
+            MarketplaceKPI(
+                marketplace=MP_NAMES["ozon"],
+                revenue=official_ozon["revenue"],
+                actual_revenue=official_ozon["actual_revenue"],
+                expenses=official_ozon["expenses"],
+                gross_profit=official_ozon["gross_profit"],
+                net_profit=official_ozon["net_profit"],
+                drr=Decimal(0),
+            )
+        ]
 
     kpi = KPIData(
         revenue=total_revenue,
@@ -596,6 +684,23 @@ async def get_dashboard(
             )
         )
 
+    if official_ozon:
+        mp_comparison = [
+            MarketplaceComparison(
+                marketplace=MP_NAMES["ozon"],
+                revenue=official_ozon["revenue"],
+                expenses=official_ozon["expenses"],
+                gross_profit=official_ozon["gross_profit"],
+                net_profit=official_ozon["net_profit"],
+                net_margin=(
+                    official_ozon["net_profit"] / official_ozon["revenue"] * 100
+                    if official_ozon["revenue"]
+                    else Decimal(0)
+                ),
+                drr=Decimal(0),
+            )
+        ]
+
     # Unit economics — group by product, show per-marketplace rows
     sku_sales: Dict[tuple, List[Sale]] = {}
     for s in sales:
@@ -611,9 +716,13 @@ async def get_dashboard(
         if day is None:
             continue
         daily_revenue.setdefault(key, {})
-        daily_revenue[key][day] = daily_revenue[key].get(day, Decimal(0)) + _gross_revenue(s)
+        daily_revenue[key][day] = daily_revenue[key].get(
+            day, Decimal(0)
+        ) + _gross_revenue(s)
         daily_actual_revenue.setdefault(key, {})
-        daily_actual_revenue[key][day] = daily_actual_revenue[key].get(day, Decimal(0)) + _buyer_revenue(s)
+        daily_actual_revenue[key][day] = daily_actual_revenue[key].get(
+            day, Decimal(0)
+        ) + _buyer_revenue(s)
 
     product_unit_map: Dict[str, dict] = {}
     for (external_sku, shop_id), s_sales in sku_sales.items():
@@ -628,17 +737,27 @@ async def get_dashboard(
         total_qty = sum(s.quantity or 0 for s in s_sales)
         total_revenue_sku = sum(_gross_revenue(s) for s in s_sales)
         gross_price = (total_revenue_sku / total_qty) if total_qty > 0 else Decimal(0)
-        actual_price = (sum(_buyer_revenue(s) for s in s_sales) / total_qty) if total_qty > 0 else Decimal(0)
+        actual_price = (
+            (sum(_buyer_revenue(s) for s in s_sales) / total_qty)
+            if total_qty > 0
+            else Decimal(0)
+        )
         total_expenses_sku = sum(_sale_expenses(s) for s in s_sales)
         total_ads_sku = sum(_to_decimal(s.advertising) for s in s_sales)
 
         # Net/margin are based on the seller's gross price (what the marketplace
         # credits the seller, incl. marketplace-funded discounts/SPP), not on the
         # buyer-paid amount — otherwise marketplace-funded discounts look like a loss.
-        expense_per_unit = (total_expenses_sku / total_qty) if total_qty > 0 else Decimal(0)
+        expense_per_unit = (
+            (total_expenses_sku / total_qty) if total_qty > 0 else Decimal(0)
+        )
         net_per = gross_price - _to_decimal(p.cost_price) - expense_per_unit
         margin = (net_per / gross_price * 100) if gross_price > 0 else Decimal(0)
-        drr_sku = (total_ads_sku / total_revenue_sku * 100) if total_revenue_sku > 0 else Decimal(0)
+        drr_sku = (
+            (total_ads_sku / total_revenue_sku * 100)
+            if total_revenue_sku > 0
+            else Decimal(0)
+        )
 
         if p.sku not in product_unit_map:
             product_unit_map[p.sku] = {
@@ -649,7 +768,11 @@ async def get_dashboard(
             }
 
         trend = [
-            int(daily_actual_revenue.get((external_sku, shop_id), {}).get(day, Decimal(0)))
+            int(
+                daily_actual_revenue.get((external_sku, shop_id), {}).get(
+                    day, Decimal(0)
+                )
+            )
             for day in trend_dates
         ]
 
@@ -673,6 +796,42 @@ async def get_dashboard(
         key=lambda x: sum(r.net_per_unit * r.sales for r in x.rows),
         reverse=True,
     )
+
+    if official_ozon:
+        official_unit_rows = []
+        for row in official_ozon["unit_economics"]:
+            gross_price = row["gross_price"]
+            profit_period = row["profit_period"]
+            official_unit_rows.append(
+                UnitEconomicsRow(
+                    sku=row["sku"],
+                    name=row["name"],
+                    cost=row["cost"],
+                    rows=[
+                        UnitEconomicsMarketplaceRow(
+                            marketplace=MP_NAMES["ozon"],
+                            sales=row["items"],
+                            gross_price=gross_price,
+                            actual_price=row["actual_price"],
+                            cost=row["cost"],
+                            expense_per_unit=row["expense_per_unit"],
+                            net_per_unit=row["profit_per_unit"],
+                            margin=(
+                                profit_period / (gross_price * row["items"]) * 100
+                                if gross_price and row["items"]
+                                else Decimal(0)
+                            ),
+                            drr=row["drr"],
+                            trend=[0] * len(trend_dates),
+                        )
+                    ],
+                )
+            )
+        unit_rows = sorted(
+            official_unit_rows,
+            key=lambda row: sum(item.net_per_unit * item.sales for item in row.rows),
+            reverse=True,
+        )
 
     # Product dashboard rows
     product_rows: List[ProductDashboardRow] = []
@@ -723,6 +882,32 @@ async def get_dashboard(
                 alert_stock=alert_stock,
             )
         )
+
+    if official_ozon:
+        existing_products = {row.sku: row for row in product_rows}
+        product_rows = []
+        for row in official_ozon["unit_economics"]:
+            existing = existing_products.get(row["sku"])
+            product = products.get(row["sku"])
+            product_rows.append(
+                ProductDashboardRow(
+                    sku=row["sku"],
+                    name=row["name"],
+                    revenue=row["gross_price"] * row["items"],
+                    net_profit=row["profit_period"],
+                    margin=(
+                        row["profit_period"] / (row["gross_price"] * row["items"]) * 100
+                        if row["gross_price"] and row["items"]
+                        else Decimal(0)
+                    ),
+                    drr=row["drr"],
+                    avg_price=row["actual_price"],
+                    min_price=product.min_price if product else Decimal(0),
+                    total_stock=existing.total_stock if existing else 0,
+                    alert_price=False,
+                    alert_stock=existing.alert_stock if existing else False,
+                )
+            )
 
     # --- Alerts ---
     alerts: List[AlertItem] = []
@@ -791,9 +976,7 @@ async def get_dashboard(
         expense_structure["ads"] += max(_to_decimal(s.advertising), Decimal("0"))
         expense_structure["returns"] += max(_to_decimal(s.returns), Decimal("0"))
         expense_structure["other"] += max(
-            _to_decimal(s.insurance)
-            + _to_decimal(s.acquiring)
-            + _to_decimal(s.other),
+            _to_decimal(s.insurance) + _to_decimal(s.acquiring) + _to_decimal(s.other),
             Decimal("0"),
         )
 

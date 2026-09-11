@@ -48,7 +48,9 @@ class OzonAdapter(MarketplaceAdapter):
     async def _post(self, endpoint: str, data: Optional[Dict] = None) -> Any:
         url = f"{self.BASE_URL}{endpoint}"
         async with self._http_client() as client:
-            response = await client.post(url, headers=self.headers, json=data or {}, timeout=30.0)
+            response = await client.post(
+                url, headers=self.headers, json=data or {}, timeout=30.0
+            )
             response.raise_for_status()
             return response.json()
 
@@ -74,7 +76,9 @@ class OzonAdapter(MarketplaceAdapter):
                     return parsed
         return fallback
 
-    async def get_sales(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
+    async def get_sales(
+        self, date_from: datetime, date_to: datetime
+    ) -> List[Dict[str, Any]]:
         data = await self._post_with_delay(
             "/v1/analytics/data",
             {
@@ -93,21 +97,27 @@ class OzonAdapter(MarketplaceAdapter):
             dimensions = item.get("dimensions", [{}])[0]
             metrics = item.get("metrics", [0, 0, 0])
 
-            sales.append({
-                "date": datetime.strptime(dimensions.get("day", ""), "%Y-%m-%d") if dimensions.get("day") else date_from,
-                "external_sku": str(dimensions.get("sku", "")),
-                "external_id": str(dimensions.get("sku", "")),
-                "quantity": int(metrics[0] or 0),
-                "price": Decimal("0"),
-                "revenue": Decimal(str(metrics[1] or 0)),
-                "commission": Decimal("0"),
-                "logistics": Decimal("0"),
-                "storage": Decimal("0"),
-                "advertising": Decimal("0"),
-                "returns": Decimal("0"),
-                "other": Decimal("0"),
-                "is_return": False,
-            })
+            sales.append(
+                {
+                    "date": (
+                        datetime.strptime(dimensions.get("day", ""), "%Y-%m-%d")
+                        if dimensions.get("day")
+                        else date_from
+                    ),
+                    "external_sku": str(dimensions.get("sku", "")),
+                    "external_id": str(dimensions.get("sku", "")),
+                    "quantity": int(metrics[0] or 0),
+                    "price": Decimal("0"),
+                    "revenue": Decimal(str(metrics[1] or 0)),
+                    "commission": Decimal("0"),
+                    "logistics": Decimal("0"),
+                    "storage": Decimal("0"),
+                    "advertising": Decimal("0"),
+                    "returns": Decimal("0"),
+                    "other": Decimal("0"),
+                    "is_return": False,
+                }
+            )
         return sales
 
     async def _fetch_postings(
@@ -136,8 +146,12 @@ class OzonAdapter(MarketplaceAdapter):
                     {
                         "dir": "ASC",
                         "filter": {
-                            "since": current.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-                            "to": chunk_end.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                            "since": current.astimezone(timezone.utc)
+                            .isoformat()
+                            .replace("+00:00", "Z"),
+                            "to": chunk_end.astimezone(timezone.utc)
+                            .isoformat()
+                            .replace("+00:00", "Z"),
                         },
                         "limit": limit,
                         "offset": offset,
@@ -179,19 +193,28 @@ class OzonAdapter(MarketplaceAdapter):
             if (
                 (offer_id and fp_offer_id and fp_offer_id == offer_id)
                 or (sku is not None and fp_sku is not None and str(fp_sku) == str(sku))
-                or (sku is not None and fp_product_id is not None and str(fp_product_id) == str(sku))
+                or (
+                    sku is not None
+                    and fp_product_id is not None
+                    and str(fp_product_id) == str(sku)
+                )
             ):
                 return fp
         return None
 
-    def _extract_posting_expenses(self, item: Dict[str, Any], product: Dict[str, Any]) -> Dict[str, Decimal]:
+    def _extract_posting_expenses(
+        self, item: Dict[str, Any], product: Dict[str, Any]
+    ) -> Dict[str, Decimal]:
         """Extract per-product expenses from Ozon posting financial_data."""
         analytics = item.get("analytics_data") or {}
         financial = item.get("financial_data") or {}
         product_financial = self._get_product_financial(item, product)
 
         def get(*keys):
-            for src in ([product_financial] if product_financial else []) + [financial, analytics]:
+            for src in ([product_financial] if product_financial else []) + [
+                financial,
+                analytics,
+            ]:
                 if not src:
                     continue
                 for key in keys:
@@ -202,7 +225,9 @@ class OzonAdapter(MarketplaceAdapter):
 
         return {
             "commission": get("commission_amount", "commission"),
-            "logistics": get("delivery_rub", "delivery_amount", "logistics_amount", "logistics"),
+            "logistics": get(
+                "delivery_rub", "delivery_amount", "logistics_amount", "logistics"
+            ),
             "storage": get("storage_amount", "storage"),
             "returns": get("return_amount", "returns", "refund_amount"),
             "insurance": get("insurance_amount", "insurance"),
@@ -210,7 +235,9 @@ class OzonAdapter(MarketplaceAdapter):
             "other": get("picking_amount", "price_service_amount", "other"),
         }
 
-    async def get_orders(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
+    async def get_orders(
+        self, date_from: datetime, date_to: datetime
+    ) -> List[Dict[str, Any]]:
         orders = []
 
         fbo_items = await self._fetch_postings(
@@ -224,21 +251,33 @@ class OzonAdapter(MarketplaceAdapter):
                 quantity = product.get("quantity", 1)
                 pf = self._get_product_financial(item, product)
                 # Use financial_data price when available; fallback to posting price.
-                price = Decimal(str(pf.get("price", product.get("price", "0")) if pf else product.get("price", "0") or "0"))
-                customer_price = Decimal(str(pf.get("customer_price", 0) or 0)) if pf else Decimal(0)
-                marketplace_discount = max(price - customer_price, Decimal(0)) * quantity
-                orders.append({
-                    "date": created_at,
-                    "external_sku": str(product.get("offer_id", "")),
-                    "external_id": posting_number,
-                    "quantity": quantity,
-                    "price": price,
-                    "customer_price": customer_price,
-                    "marketplace_discount": marketplace_discount,
-                    "revenue": price * quantity,
-                    "status": item.get("status", ""),
-                    **expenses,
-                })
+                price = Decimal(
+                    str(
+                        pf.get("price", product.get("price", "0"))
+                        if pf
+                        else product.get("price", "0") or "0"
+                    )
+                )
+                customer_price = (
+                    Decimal(str(pf.get("customer_price", 0) or 0)) if pf else Decimal(0)
+                )
+                marketplace_discount = (
+                    max(price - customer_price, Decimal(0)) * quantity
+                )
+                orders.append(
+                    {
+                        "date": created_at,
+                        "external_sku": str(product.get("offer_id", "")),
+                        "external_id": posting_number,
+                        "quantity": quantity,
+                        "price": price,
+                        "customer_price": customer_price,
+                        "marketplace_discount": marketplace_discount,
+                        "revenue": price * quantity,
+                        "status": item.get("status", ""),
+                        **expenses,
+                    }
+                )
 
         fbs_items = await self._fetch_postings(
             "/v3/posting/fbs/list", date_from, date_to, result_key="postings"
@@ -250,21 +289,33 @@ class OzonAdapter(MarketplaceAdapter):
                 expenses = self._extract_posting_expenses(item, product)
                 quantity = product.get("quantity", 1)
                 pf = self._get_product_financial(item, product)
-                price = Decimal(str(pf.get("price", product.get("price", "0")) if pf else product.get("price", "0") or "0"))
-                customer_price = Decimal(str(pf.get("customer_price", 0) or 0)) if pf else Decimal(0)
-                marketplace_discount = max(price - customer_price, Decimal(0)) * quantity
-                orders.append({
-                    "date": created_at,
-                    "external_sku": str(product.get("offer_id", "")),
-                    "external_id": posting_number,
-                    "quantity": quantity,
-                    "price": price,
-                    "customer_price": customer_price,
-                    "marketplace_discount": marketplace_discount,
-                    "revenue": price * quantity,
-                    "status": item.get("status", ""),
-                    **expenses,
-                })
+                price = Decimal(
+                    str(
+                        pf.get("price", product.get("price", "0"))
+                        if pf
+                        else product.get("price", "0") or "0"
+                    )
+                )
+                customer_price = (
+                    Decimal(str(pf.get("customer_price", 0) or 0)) if pf else Decimal(0)
+                )
+                marketplace_discount = (
+                    max(price - customer_price, Decimal(0)) * quantity
+                )
+                orders.append(
+                    {
+                        "date": created_at,
+                        "external_sku": str(product.get("offer_id", "")),
+                        "external_id": posting_number,
+                        "quantity": quantity,
+                        "price": price,
+                        "customer_price": customer_price,
+                        "marketplace_discount": marketplace_discount,
+                        "revenue": price * quantity,
+                        "status": item.get("status", ""),
+                        **expenses,
+                    }
+                )
 
         return orders
 
@@ -281,17 +332,25 @@ class OzonAdapter(MarketplaceAdapter):
                 total_present = sum(s.get("present", 0) for s in stock_entries)
                 total_reserved = sum(s.get("reserved", 0) for s in stock_entries)
 
-                stocks.append({
-                    "external_sku": str(item.get("offer_id", "")),
-                    "external_id": str(item.get("product_id", "")),
-                    "warehouse": stock_entries[0].get("warehouse_name", "FBS") if stock_entries else "FBS",
-                    "quantity": total_present,
-                    "in_way": total_reserved,
-                })
+                stocks.append(
+                    {
+                        "external_sku": str(item.get("offer_id", "")),
+                        "external_id": str(item.get("product_id", "")),
+                        "warehouse": (
+                            stock_entries[0].get("warehouse_name", "FBS")
+                            if stock_entries
+                            else "FBS"
+                        ),
+                        "quantity": total_present,
+                        "in_way": total_reserved,
+                    }
+                )
             return stocks
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
-                logger.warning("Ozon /v3/product/info/stocks returned 404, skipping stocks")
+                logger.warning(
+                    "Ozon /v3/product/info/stocks returned 404, skipping stocks"
+                )
                 return []
             raise
 
@@ -318,13 +377,19 @@ class OzonAdapter(MarketplaceAdapter):
             return result
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
-                logger.warning("Ozon /v3/product/info/list returned 404, names unavailable")
+                logger.warning(
+                    "Ozon /v3/product/info/list returned 404, names unavailable"
+                )
             else:
                 logger.warning("Ozon /v3/product/info/list failed: %s", e)
             return {}
 
-    async def get_adverts(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
-        logger.warning("Ozon ads skipped: requires Performance API (OAuth). Seller API does not provide campaign endpoints.")
+    async def get_adverts(
+        self, date_from: datetime, date_to: datetime
+    ) -> List[Dict[str, Any]]:
+        logger.warning(
+            "Ozon ads skipped: requires Performance API (OAuth). Seller API does not provide campaign endpoints."
+        )
         return []
 
     async def get_prices(self) -> List[Dict[str, Any]]:
@@ -345,16 +410,20 @@ class OzonAdapter(MarketplaceAdapter):
                     price_val = price_info.get("price", 0)
                 else:
                     price_val = item.get("price", 0)
-                prices.append({
-                    "external_sku": str(item.get("offer_id", "")),
-                    "external_id": str(item.get("sku", "")),
-                    "price": Decimal(str(price_val or 0)),
-                    "discount": item.get("discount", 0),
-                })
+                prices.append(
+                    {
+                        "external_sku": str(item.get("offer_id", "")),
+                        "external_id": str(item.get("sku", "")),
+                        "price": Decimal(str(price_val or 0)),
+                        "discount": item.get("discount", 0),
+                    }
+                )
             return prices
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
-                logger.warning("Ozon /v5/product/info/prices returned 404, skipping prices")
+                logger.warning(
+                    "Ozon /v5/product/info/prices returned 404, skipping prices"
+                )
                 return []
             raise
 
@@ -383,43 +452,98 @@ class OzonAdapter(MarketplaceAdapter):
                 "payout_at": None,
             }
         except Exception as e:
-            logger.warning("Failed to get Ozon balance for shop %s: %s", self.shop_id, e)
+            logger.warning(
+                "Failed to get Ozon balance for shop %s: %s", self.shop_id, e
+            )
             return None
 
     # Fee type_id -> expense category, from GET /v1/finance/accrual/types.
     _FEE_TYPE_CATEGORIES = {
         # commission
-        8: "commission",    # ClaimCommission
-        63: "commission",   # RfbsDomesticAgentFee
-        66: "commission",   # RfbsGlobalAgentFee
-        68: "commission",   # RfbsServiceFee
-        69: "commission",   # SaleCommission
+        8: "commission",  # ClaimCommission
+        63: "commission",  # RfbsDomesticAgentFee
+        66: "commission",  # RfbsGlobalAgentFee
+        68: "commission",  # RfbsServiceFee
+        69: "commission",  # SaleCommission
         # logistics
-        2: "logistics", 13: "logistics", 16: "logistics", 17: "logistics",
-        28: "logistics", 29: "logistics", 30: "logistics", 32: "logistics",
-        42: "logistics", 43: "logistics", 44: "logistics", 56: "logistics",
-        64: "logistics", 67: "logistics", 73: "logistics", 88: "logistics",
-        97: "logistics", 98: "logistics", 99: "logistics", 100: "logistics",
-        106: "logistics", 107: "logistics", 110: "logistics", 111: "logistics",
-        112: "logistics", 114: "logistics", 115: "logistics", 120: "logistics",
+        2: "logistics",
+        13: "logistics",
+        16: "logistics",
+        17: "logistics",
+        28: "logistics",
+        29: "logistics",
+        30: "logistics",
+        32: "logistics",
+        42: "logistics",
+        43: "logistics",
+        44: "logistics",
+        56: "logistics",
+        64: "logistics",
+        67: "logistics",
+        73: "logistics",
+        88: "logistics",
+        97: "logistics",
+        98: "logistics",
+        99: "logistics",
+        100: "logistics",
+        106: "logistics",
+        107: "logistics",
+        110: "logistics",
+        111: "logistics",
+        112: "logistics",
+        114: "logistics",
+        115: "logistics",
+        120: "logistics",
         121: "logistics",
         # storage
-        46: "storage", 58: "storage", 60: "storage", 78: "storage",
-        79: "storage", 102: "storage",
+        46: "storage",
+        58: "storage",
+        60: "storage",
+        78: "storage",
+        79: "storage",
+        102: "storage",
         # returns
-        9: "returns", 40: "returns", 45: "returns", 53: "returns",
-        59: "returns", 65: "returns", 113: "returns",
+        9: "returns",
+        40: "returns",
+        45: "returns",
+        53: "returns",
+        59: "returns",
+        65: "returns",
+        113: "returns",
         # advertising
-        3: "advertising", 4: "advertising", 5: "advertising", 19: "advertising",
-        23: "advertising", 31: "advertising", 33: "advertising", 36: "advertising",
-        41: "advertising", 47: "advertising", 49: "advertising", 50: "advertising",
-        51: "advertising", 52: "advertising", 54: "advertising", 55: "advertising",
-        61: "advertising", 70: "advertising", 74: "advertising", 75: "advertising",
-        80: "advertising", 87: "advertising", 95: "advertising", 96: "advertising",
-        116: "advertising", 117: "advertising", 118: "advertising", 119: "advertising",
+        3: "advertising",
+        4: "advertising",
+        5: "advertising",
+        19: "advertising",
+        23: "advertising",
+        31: "advertising",
+        33: "advertising",
+        36: "advertising",
+        41: "advertising",
+        47: "advertising",
+        49: "advertising",
+        50: "advertising",
+        51: "advertising",
+        52: "advertising",
+        54: "advertising",
+        55: "advertising",
+        61: "advertising",
+        70: "advertising",
+        74: "advertising",
+        75: "advertising",
+        80: "advertising",
+        87: "advertising",
+        95: "advertising",
+        96: "advertising",
+        116: "advertising",
+        117: "advertising",
+        118: "advertising",
+        119: "advertising",
         # acquiring / insurance
         1: "acquiring",
-        76: "insurance", 104: "insurance", 105: "insurance",
+        76: "insurance",
+        104: "insurance",
+        105: "insurance",
     }
 
     def _category_for_fee_type(self, type_id: Any) -> str:
@@ -438,7 +562,9 @@ class OzonAdapter(MarketplaceAdapter):
         except ArithmeticError:
             return Decimal("0")
 
-    async def get_finance_report(self, date_from: datetime, date_to: datetime) -> List[Dict[str, Any]]:
+    async def get_finance_report(
+        self, date_from: datetime, date_to: datetime
+    ) -> List[Dict[str, Any]]:
         """Fetch daily accruals from Ozon and return normalized expense rows.
 
         Ozon disabled /v3/finance/transaction/list (September 2026). Its
@@ -449,20 +575,24 @@ class OzonAdapter(MarketplaceAdapter):
           - ITEM: per-SKU fees (e.g. acquiring);
           - NON_ITEM: shop-level fees (e.g. stock insurance).
         Fees are typed by ``type_id`` (see /v1/finance/accrual/types); we map
-        them to the dashboard expense categories. Only negative amounts
-        (charges to the seller) become expenses — positive credits such as
-        compensations are skipped, matching the old behavior.
+        them to dashboard categories while preserving the original sign.
+        Positive credits are required for a correct seller-level profit.
 
         The endpoint accepts a single calendar day per request and paginates
         via an opaque ``last_id`` token, so we iterate day by day.
         """
         aggregated: Dict[tuple, Dict[str, Any]] = {}
 
-        def add_fee(day: datetime, posting_number: Optional[str], sku: Optional[str],
-                    category: str, amount: Decimal, type_id: Any, accrual_id: Any,
-                    op_kind: str) -> None:
-            if amount >= 0:
-                return
+        def add_fee(
+            day: datetime,
+            posting_number: Optional[str],
+            sku: Optional[str],
+            category: str,
+            amount: Decimal,
+            type_id: Any,
+            accrual_id: Any,
+            op_kind: str,
+        ) -> None:
             key = (posting_number, sku, category, op_kind)
             row = aggregated.get(key)
             if row is None:
@@ -474,20 +604,38 @@ class OzonAdapter(MarketplaceAdapter):
                     "operation_name": f"type_{type_id}",
                     "category": category,
                     "amount": Decimal("0"),
-                    "raw": {"accrual_id": accrual_id, "type_id": type_id},
+                    "raw": {
+                        "accrual_id": accrual_id,
+                        "type_id": type_id,
+                        "signed": True,
+                    },
                 }
                 aggregated[key] = row
-            row["amount"] += abs(amount)
+            row["amount"] += amount
 
-        def walk_fees(fees: Any, day: datetime, posting_number: Optional[str],
-                      sku: Optional[str], accrual_id: Any, op_kind: str) -> None:
+        def walk_fees(
+            fees: Any,
+            day: datetime,
+            posting_number: Optional[str],
+            sku: Optional[str],
+            accrual_id: Any,
+            op_kind: str,
+        ) -> None:
             for fee in fees or []:
                 if not isinstance(fee, dict):
                     continue
                 type_id = fee.get("type_id")
                 amount = self._money(fee.get("accrued"))
-                add_fee(day, posting_number, sku, self._category_for_fee_type(type_id),
-                        amount, type_id, accrual_id, op_kind)
+                add_fee(
+                    day,
+                    posting_number,
+                    sku,
+                    self._category_for_fee_type(type_id),
+                    amount,
+                    type_id,
+                    accrual_id,
+                    op_kind,
+                )
 
         day = date_from.date() if isinstance(date_from, datetime) else date_from
         last_day = date_to.date() if isinstance(date_to, datetime) else date_to
@@ -496,10 +644,15 @@ class OzonAdapter(MarketplaceAdapter):
         while day <= last_day:
             last_id: Optional[str] = None
             while True:
-                payload: Dict[str, Any] = {"date": day.strftime("%Y-%m-%d"), "limit": 1000}
+                payload: Dict[str, Any] = {
+                    "date": day.strftime("%Y-%m-%d"),
+                    "limit": 1000,
+                }
                 if last_id:
                     payload["last_id"] = last_id
-                data = await self._post_with_delay("/v1/finance/accrual/by-day", payload)
+                data = await self._post_with_delay(
+                    "/v1/finance/accrual/by-day", payload
+                )
                 accruals = data.get("accruals") or []
                 accrual_count += len(accruals)
                 new_last_id = data.get("last_id")
@@ -516,29 +669,62 @@ class OzonAdapter(MarketplaceAdapter):
                         commission = self._money(
                             (product.get("commission") or {}).get("sale_commission")
                         )
-                        add_fee(day_dt, posting_number, sku, "commission",
-                                commission, 69, accrual_id, op_kind)
+                        add_fee(
+                            day_dt,
+                            posting_number,
+                            sku,
+                            "commission",
+                            commission,
+                            69,
+                            accrual_id,
+                            op_kind,
+                        )
                         delivery = product.get("delivery") or {}
-                        walk_fees(delivery.get("services"), day_dt, posting_number,
-                                  sku, accrual_id, op_kind)
+                        walk_fees(
+                            delivery.get("services"),
+                            day_dt,
+                            posting_number,
+                            sku,
+                            accrual_id,
+                            op_kind,
+                        )
 
                     for group in (acc.get("item_fees") or {}).get("fees") or []:
                         sku = str(group.get("sku", "")) or None
-                        walk_fees(group.get("fees"), day_dt, posting_number, sku,
-                                  accrual_id, op_kind)
+                        walk_fees(
+                            group.get("fees"),
+                            day_dt,
+                            posting_number,
+                            sku,
+                            accrual_id,
+                            op_kind,
+                        )
 
                     non_item = acc.get("non_item_fee")
                     if isinstance(non_item, dict):
                         type_id = non_item.get("type_id")
                         amount = self._money(non_item.get("accrued"))
-                        add_fee(day_dt, posting_number, None,
-                                self._category_for_fee_type(type_id), amount,
-                                type_id, accrual_id, op_kind)
+                        add_fee(
+                            day_dt,
+                            posting_number,
+                            None,
+                            self._category_for_fee_type(type_id),
+                            amount,
+                            type_id,
+                            accrual_id,
+                            op_kind,
+                        )
 
                     container = acc.get("container_fees")
                     if isinstance(container, dict):
-                        walk_fees(container.get("fees"), day_dt, posting_number, None,
-                                  accrual_id, op_kind)
+                        walk_fees(
+                            container.get("fees"),
+                            day_dt,
+                            posting_number,
+                            None,
+                            accrual_id,
+                            op_kind,
+                        )
 
                 if not accruals or not new_last_id or new_last_id == last_id:
                     break
@@ -548,6 +734,7 @@ class OzonAdapter(MarketplaceAdapter):
 
         logger.info(
             "Ozon accruals fetched: %d accruals, %d expense rows",
-            accrual_count, len(aggregated),
+            accrual_count,
+            len(aggregated),
         )
         return list(aggregated.values())
