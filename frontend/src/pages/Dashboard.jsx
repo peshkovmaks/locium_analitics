@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { dashboard, balances } from '../lib/api';
 
 const MP_NAMES = { wb: 'Wildberries', ozon: 'Ozon', ym: 'Яндекс Маркет' };
@@ -796,6 +796,183 @@ function BalancesSection({ items, loading, error }) {
   );
 }
 
+const ABC_COLORS = { A: '#16a34a', B: '#d97706', C: '#6b7280' };
+const ABC_COLLAPSED_KEY = 'dashboard_abc_collapsed';
+
+function AbcReportSection({ data, loading, error, collapsed, onToggle }) {
+  const periodLabel = data
+    ? `${new Date(data.start_date).toLocaleDateString('ru-RU')} — ${new Date(data.end_date).toLocaleDateString('ru-RU')}`
+    : '';
+
+  const totalRevenue = (data?.items || []).reduce(
+    (sum, item) => sum + Number(item.revenue || 0),
+    0
+  );
+
+  return (
+    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">ABC-анализ</h2>
+          {data && <p className="text-sm text-gray-500">Период: {periodLabel}</p>}
+        </div>
+        <button
+          onClick={onToggle}
+          className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+        >
+          {collapsed ? 'Развернуть' : 'Свернуть'}
+          <svg
+            className={classNames('w-3 h-3 transition-transform', !collapsed && 'rotate-180')}
+            viewBox="0 0 10 6"
+            fill="none"
+          >
+            <path
+              d="M1 1l4 4 4-4"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
+
+      {!collapsed && (
+        <Fragment>
+          {error && (
+            <p className="text-sm text-red-600">Ошибка загрузки ABC-анализа: {error}</p>
+          )}
+          {loading && !data && (
+            <p className="text-sm text-gray-400">Загрузка ABC-анализа...</p>
+          )}
+
+          {data && (
+            <Fragment>
+              <div className="flex flex-wrap items-center gap-x-8 gap-y-3 text-sm border-b border-gray-100 pb-4 mb-5">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-gray-500">По выручке:</span>
+                  {['A', 'B', 'C'].map((cls) => (
+                    <span key={cls} className="flex items-center gap-1.5">
+                      <Badge color={ABC_COLORS[cls]}>{cls}</Badge>
+                      <span className="text-gray-600">{data.abc?.summary?.[cls] ?? 0}</span>
+                      <span className="text-gray-400">
+                        · {formatPercent(data.abc?.revenue_share_percent?.[cls])}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-gray-500">По марже:</span>
+                  {['A', 'B', 'C'].map((cls) => (
+                    <span key={cls} className="flex items-center gap-1.5">
+                      <Badge color={ABC_COLORS[cls]}>{cls}</Badge>
+                      <span className="text-gray-600">
+                        {data.abc_margin?.summary?.[cls] ?? 0}
+                      </span>
+                    </span>
+                  ))}
+                  <span className="text-gray-500">
+                    Доля прибыли в A:{' '}
+                    <span className="font-semibold text-gray-900">
+                      {formatPercent(data.abc_margin?.a_profit_share_percent)}
+                    </span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <h3 className="font-semibold mb-3">ABC по выручке</h3>
+                <table className="w-full text-sm min-w-[720px] mb-6">
+                  <thead className="text-gray-500 border-b">
+                    <tr>
+                      <th className="text-left py-2 font-normal">SKU</th>
+                      <th className="text-left py-2 font-normal">Название</th>
+                      <th className="text-right py-2 font-normal">Выручка</th>
+                      <th className="text-right py-2 font-normal">Прибыль</th>
+                      <th className="text-right py-2 font-normal">Маржа</th>
+                      <th className="text-right py-2 font-normal">Доля в выручке</th>
+                      <th className="text-right py-2 font-normal">Класс</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(data.items || []).slice(0, 15).map((item) => (
+                      <tr key={item.sku} className="border-b">
+                        <td className="py-2 font-medium">{item.sku}</td>
+                        <td className="py-2 max-w-[220px] truncate text-gray-600">{item.name}</td>
+                        <td className="text-right tabular-nums">{formatMoney(item.revenue)}</td>
+                        <td
+                          className={classNames(
+                            'text-right tabular-nums',
+                            Number(item.profit) >= 0 ? 'text-green-600' : 'text-red-600'
+                          )}
+                        >
+                          {formatMoney(item.profit)}
+                        </td>
+                        <td className="text-right tabular-nums text-gray-500">
+                          {formatPercent(item.margin_percent)}
+                        </td>
+                        <td className="text-right tabular-nums text-gray-500">
+                          {formatPercent(
+                            totalRevenue > 0 ? (Number(item.revenue || 0) / totalRevenue) * 100 : 0
+                          )}
+                        </td>
+                        <td className="text-right">
+                          <Badge color={ABC_COLORS[item.abc_class]}>{item.abc_class}</Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="overflow-x-auto">
+                <h3 className="font-semibold mb-3">ABC по марже</h3>
+                <table className="w-full text-sm min-w-[640px]">
+                  <thead className="text-gray-500 border-b">
+                    <tr>
+                      <th className="text-left py-2 font-normal">SKU</th>
+                      <th className="text-left py-2 font-normal">Название</th>
+                      <th className="text-right py-2 font-normal">Прибыль</th>
+                      <th className="text-right py-2 font-normal">Маржа</th>
+                      <th className="text-right py-2 font-normal">Доля в прибыли</th>
+                      <th className="text-right py-2 font-normal">Класс</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(data.abc_margin?.items || []).slice(0, 15).map((item) => (
+                      <tr key={item.sku} className="border-b">
+                        <td className="py-2 font-medium">{item.sku}</td>
+                        <td className="py-2 max-w-[220px] truncate text-gray-600">{item.name}</td>
+                        <td
+                          className={classNames(
+                            'text-right tabular-nums',
+                            Number(item.profit) >= 0 ? 'text-green-600' : 'text-red-600'
+                          )}
+                        >
+                          {formatMoney(item.profit)}
+                        </td>
+                        <td className="text-right tabular-nums text-gray-500">
+                          {formatPercent(item.margin_percent)}
+                        </td>
+                        <td className="text-right tabular-nums text-gray-500">
+                          {formatPercent(item.profit_share_percent)}
+                        </td>
+                        <td className="text-right">
+                          <Badge color={ABC_COLORS[item.class]}>{item.class}</Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Fragment>
+          )}
+        </Fragment>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [period, setPeriod] = useState('today');
   const [marketplace, setMarketplace] = useState('all');
@@ -806,6 +983,19 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [alertsOpen, setAlertsOpen] = useState(true);
+
+  const [abcData, setAbcData] = useState(null);
+  const [abcLoading, setAbcLoading] = useState(false);
+  const [abcError, setAbcError] = useState('');
+  const [abcCollapsed, setAbcCollapsed] = useState(
+    () => localStorage.getItem(ABC_COLLAPSED_KEY) === '1'
+  );
+
+  const toggleAbc = () => {
+    const next = !abcCollapsed;
+    setAbcCollapsed(next);
+    localStorage.setItem(ABC_COLLAPSED_KEY, next ? '1' : '0');
+  };
 
   const [balanceItems, setBalanceItems] = useState([]);
   const [balancesLoading, setBalancesLoading] = useState(true);
@@ -836,6 +1026,19 @@ export default function Dashboard() {
   useEffect(() => {
     loadData();
   }, [period, marketplace, dateRange]);
+
+  useEffect(() => {
+    if (abcCollapsed) return;
+    setAbcLoading(true);
+    setAbcError('');
+    const start = dateRange.start || null;
+    const end = dateRange.end || null;
+    dashboard
+      .getAbc(period, marketplace, start, end)
+      .then(setAbcData)
+      .catch((e) => setAbcError(e.message))
+      .finally(() => setAbcLoading(false));
+  }, [period, marketplace, dateRange, abcCollapsed]);
 
   const kpi = data?.kpi;
   const mpRows = data?.marketplace_comparison || [];
@@ -1198,6 +1401,15 @@ export default function Dashboard() {
           <DRRBarChart data={mpRowsWithKeys} />
         </div>
       </div>
+
+      {/* ABC analysis */}
+      <AbcReportSection
+        data={abcData}
+        loading={abcLoading}
+        error={abcError}
+        collapsed={abcCollapsed}
+        onToggle={toggleAbc}
+      />
 
       {/* Marketplace comparison */}
       <MarketplaceComparisonTable rows={mpRowsWithKeys} />

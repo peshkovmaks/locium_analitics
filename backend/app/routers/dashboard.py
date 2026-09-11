@@ -199,6 +199,41 @@ def _calc_order_stats(
     }
 
 
+def _resolve_period_range(
+    period: str,
+    start_date: Optional[date],
+    end_date: Optional[date],
+) -> tuple[datetime, datetime]:
+    """Resolve the dashboard period filter to an explicit [start, end] range."""
+    now = datetime.utcnow()
+    if start_date and end_date:
+        return (
+            datetime.combine(start_date, datetime.min.time()),
+            datetime.combine(end_date, datetime.max.time()),
+        )
+    if period == "today":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0), now
+    if period == "7d":
+        return (
+            (now - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0),
+            now,
+        )
+    if period.startswith("m:"):
+        # Single calendar month ("m:2026-08"). The frontend renders buttons
+        # for the last three full months and shifts the set as a new month begins.
+        try:
+            y, m = map(int, period[2:].split("-"))
+            start_dt = datetime(y, m, 1)
+            next_month = datetime(y + 1, 1, 1) if m == 12 else datetime(y, m + 1, 1)
+            return start_dt, next_month - timedelta(microseconds=1)
+        except ValueError:
+            pass
+    return (
+        (now - timedelta(days=30)).replace(hour=0, minute=0, second=0, microsecond=0),
+        now,
+    )
+
+
 @router.get("/data", response_model=DashboardData)
 async def get_dashboard(
     period: str = "today",
@@ -224,36 +259,7 @@ async def get_dashboard(
     shop_ids = [s.id for s in shops]
 
     # Get date range
-    now = datetime.utcnow()
-    if start_date and end_date:
-        start_dt = datetime.combine(start_date, datetime.min.time())
-        end_dt = datetime.combine(end_date, datetime.max.time())
-    elif period == "today":
-        start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_dt = now
-    elif period == "7d":
-        start_dt = (now - timedelta(days=7)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        end_dt = now
-    elif period.startswith("m:"):
-        # Single calendar month ("m:2026-08"). The frontend renders buttons
-        # for the last three full months and shifts the set as a new month begins.
-        try:
-            y, m = map(int, period[2:].split("-"))
-            start_dt = datetime(y, m, 1)
-            next_month = datetime(y + 1, 1, 1) if m == 12 else datetime(y, m + 1, 1)
-            end_dt = next_month - timedelta(microseconds=1)
-        except ValueError:
-            start_dt = (now - timedelta(days=30)).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
-            end_dt = now
-    else:
-        start_dt = (now - timedelta(days=30)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        end_dt = now
+    start_dt, end_dt = _resolve_period_range(period, start_date, end_date)
 
     # Get sales
     sales_result = await db.execute(
@@ -1030,7 +1036,7 @@ async def get_dashboard(
     # before the cutoff is considered confirmed, a fresher one is estimated.
     profit_status = (
         "confirmed"
-        if end_dt < now - timedelta(days=WEEKLY_REPORT_DELAY_DAYS)
+        if end_dt < datetime.utcnow() - timedelta(days=WEEKLY_REPORT_DELAY_DAYS)
         else "estimated"
     )
 
@@ -1067,3 +1073,181 @@ async def get_dashboard(
         cost_coverage=cost_coverage,
         profit_status=profit_status,
     )
+
+
+
+
+@router.get("/abc")
+async def get_abc(
+    period: str = "today",
+    marketplace: str = "all",
+    start_date: Optional[date] = Query(
+        None,
+        description="Start date (YYYY-MM-DD). Overrides period if provided together with end_date.",
+    ),
+    end_date: Optional[date] = Query(
+        None,
+        description="End date (YYYY-MM-DD). Overrides period if provided together with start_date.",
+    ),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """ABC-анализ по каноническим SKU за период фильтра дашборда.
+
+    Две классификации на одном наборе SKU с продажами в периоде: классический
+    Pareto по выручке (доля ≤80% — A, ≤95% — B, остальное C) и Pareto по
+    прибыли (при total_profit ≤ 0 все SKU получают C).
+    """
+    result = await db.execute(select(Shop).where(Shop.user_id == current_user.id))
+    shops = result.scalars().all()
+
+    if marketplace != "all":
+        shops = [s for s in shops if s.marketplace.value == marketplace]
+
+    shop_ids = [s.id for s in shops]
+    start_dt, end_dt = _resolve_period_range(period, start_date, end_date)
+
+    sales_result = await db.execute(
+        select(Sale).where(
+            Sale.shop_id.in_(shop_ids),
+            Sale.date >= start_dt,
+            Sale.date <= end_dt,
+        )
+    )
+    sales = sales_result.scalars().all()
+
+    resolver = await SkuResolver.create(db, current_user.id, shop_ids or None)
+
+    items: Dict[str, dict] = {}
+
+    def _item(key: str, name: str) -> dict:
+        row = items.get(key)
+        if row is None:
+            row = {
+                "sku": key,
+                "name": name,
+                "revenue": Decimal(0),
+                "expenses": Decimal(0),
+                "cost": Decimal(0),
+                "sold_qty": 0,
+            }
+            items[key] = row
+        return row
+
+    for sale in sales:
+        product = resolver.resolve(sale.shop_id, sale.external_sku)
+        key = product.sku if product is not None else sale.external_sku
+        name = product.name if product is not None else sale.external_sku
+        row = _item(key, name)
+        row["revenue"] += (
+            -_gross_revenue(sale) if sale.is_return else _gross_revenue(sale)
+        )
+        row["expenses"] += _sale_expenses(sale)
+        qty = sale.quantity or 0
+        if sale.is_return:
+            continue
+        row["sold_qty"] += qty
+        if product is not None:
+            row["cost"] += _to_decimal(product.cost_price) * qty
+
+    rows = []
+    for row in items.values():
+        profit = row["revenue"] - row["expenses"] - row["cost"]
+        margin = profit / row["revenue"] * 100 if row["revenue"] > 0 else Decimal(0)
+        rows.append({**row, "profit": profit, "margin_percent": margin})
+
+    # В ABC участвуют только SKU с продажами в периоде.
+    rows = [r for r in rows if r["sold_qty"] > 0]
+
+    # ABC по выручке — классический Pareto.
+    total_revenue = sum((r["revenue"] for r in rows), Decimal(0))
+    abc_summary = {"A": 0, "B": 0, "C": 0}
+    abc_revenue = {"A": Decimal(0), "B": Decimal(0), "C": Decimal(0)}
+    cumulative = Decimal(0)
+    for r in sorted(rows, key=lambda x: x["revenue"], reverse=True):
+        cumulative += r["revenue"]
+        share = cumulative / total_revenue * 100 if total_revenue > 0 else Decimal(0)
+        if share <= 80:
+            cls = "A"
+        elif share <= 95:
+            cls = "B"
+        else:
+            cls = "C"
+        r["abc_class"] = cls
+        abc_summary[cls] += 1
+        abc_revenue[cls] += r["revenue"]
+
+    items_out = [
+        {
+            "sku": r["sku"],
+            "name": r["name"],
+            "revenue": float(round(r["revenue"], 2)),
+            "profit": float(round(r["profit"], 2)),
+            "margin_percent": float(round(r["margin_percent"], 2)),
+            "sold_qty": r["sold_qty"],
+            "abc_class": r["abc_class"],
+        }
+        for r in sorted(rows, key=lambda x: x["revenue"], reverse=True)
+    ]
+
+    # ABC по марже — Pareto по прибыли на том же наборе SKU.
+    total_profit = sum((r["profit"] for r in rows), Decimal(0))
+    margin_summary = {"A": 0, "B": 0, "C": 0}
+    profit_a = Decimal(0)
+    margin_rows = []
+    cumulative_profit = Decimal(0)
+    for r in sorted(rows, key=lambda x: x["profit"], reverse=True):
+        cumulative_profit += r["profit"]
+        if total_profit > 0:
+            share = r["profit"] / total_profit * 100
+            cum_share = cumulative_profit / total_profit * 100
+        else:
+            share = Decimal(0)
+            cum_share = Decimal(0)
+        if total_profit <= 0:
+            cls = "C"
+        elif cum_share <= 80:
+            cls = "A"
+        elif cum_share <= 95:
+            cls = "B"
+        else:
+            cls = "C"
+        if cls == "A":
+            profit_a += r["profit"]
+        margin_summary[cls] += 1
+        margin_rows.append(
+            {
+                "sku": r["sku"],
+                "name": r["name"],
+                "profit": float(round(r["profit"], 2)),
+                "margin_percent": float(round(r["margin_percent"], 2)),
+                "profit_share_percent": float(round(share, 2)),
+                "class": cls,
+            }
+        )
+
+    return {
+        "start_date": start_dt.date().isoformat(),
+        "end_date": end_dt.date().isoformat(),
+        "abc": {
+            "summary": abc_summary,
+            "revenue_share_percent": {
+                cls: (
+                    float(round(abc_revenue[cls] / total_revenue * 100, 2))
+                    if total_revenue > 0
+                    else 0.0
+                )
+                for cls in "ABC"
+            },
+        },
+        "items": items_out,
+        "abc_margin": {
+            "summary": margin_summary,
+            "a_profit_share_percent": (
+                float(round(profit_a / total_profit * 100, 2))
+                if total_profit > 0
+                else 0.0
+            ),
+            "items": margin_rows,
+        },
+    }

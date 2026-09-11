@@ -508,3 +508,100 @@ class TestPlanFact:
             "/api/v1/reports/plan-fact?month=2026-01", headers=auth_headers
         )
         assert resp.status_code == 404
+
+
+ABC_START = "2026-07-01"
+ABC_END = "2026-07-15"
+
+
+async def seed_dashboard_abc_products(db_session, test_user, wb_shop):
+    """Выручка: A 30000 (расходы 1000, прибыль 26000), B 15000 (прибыль 12000),
+    C 6000 (прибыль 3000). Кумулятивные доли: A 58.82%, A+B 88.24%."""
+    await make_product(db_session, test_user, wb_shop, "SKU-A", 100)
+    await make_product(db_session, test_user, wb_shop, "SKU-B", 100)
+    await make_product(db_session, test_user, wb_shop, "SKU-C", 100)
+
+    await make_sale(
+        db_session, wb_shop, "SKU-A", datetime(2026, 7, 1), 1000, 10, advertising=1000
+    )
+    await make_sale(db_session, wb_shop, "SKU-A", datetime(2026, 7, 8), 1000, 20)
+    await make_sale(db_session, wb_shop, "SKU-B", datetime(2026, 7, 1), 500, 30)
+    await make_sale(db_session, wb_shop, "SKU-C", datetime(2026, 7, 1), 200, 30)
+    await db_session.commit()
+
+
+class TestDashboardAbc:
+    async def _get(self, client, auth_headers, marketplace: str = "all"):
+        resp = await client.get(
+            f"/api/v1/dashboard/abc?period=30d&marketplace={marketplace}"
+            f"&start_date={ABC_START}&end_date={ABC_END}",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        return resp.json()
+
+    async def test_abc_pareto_by_revenue(
+        self, client, db_session, test_user, wb_shop, auth_headers
+    ):
+        await seed_dashboard_abc_products(db_session, test_user, wb_shop)
+        data = await self._get(client, auth_headers)
+
+        assert data["abc"]["summary"] == {"A": 1, "B": 1, "C": 1}
+        # Доли: A 30000/51000 = 58.82, B 15000/51000 = 29.41, C 6000/51000 = 11.76.
+        assert data["abc"]["revenue_share_percent"] == {
+            "A": 58.82,
+            "B": 29.41,
+            "C": 11.76,
+        }
+        assert [r["sku"] for r in data["items"]] == ["SKU-A", "SKU-B", "SKU-C"]
+        items = {r["sku"]: r for r in data["items"]}
+        assert items["SKU-A"]["abc_class"] == "A"
+        assert items["SKU-B"]["abc_class"] == "B"
+        assert items["SKU-C"]["abc_class"] == "C"
+        assert items["SKU-A"]["revenue"] == 30000
+        assert items["SKU-A"]["profit"] == 26000
+        assert round(Decimal(str(items["SKU-A"]["margin_percent"])), 2) == Decimal(
+            "86.67"
+        )
+
+    async def test_abc_margin_pareto(
+        self, client, db_session, test_user, wb_shop, auth_headers
+    ):
+        await seed_dashboard_abc_products(db_session, test_user, wb_shop)
+        data = await self._get(client, auth_headers)
+
+        margin = data["abc_margin"]
+        assert margin["summary"] == {"A": 1, "B": 1, "C": 1}
+        # Прибыль: A 26000 (63.41%), B 12000 (92.68% кум.), C 3000 (100%).
+        assert margin["a_profit_share_percent"] == pytest.approx(63.41, abs=0.01)
+        rows = {r["sku"]: r for r in margin["items"]}
+        assert rows["SKU-A"]["class"] == "A"
+        assert rows["SKU-B"]["class"] == "B"
+        assert rows["SKU-C"]["class"] == "C"
+        assert rows["SKU-A"]["profit"] == 26000
+        assert rows["SKU-A"]["profit_share_percent"] == pytest.approx(63.41, abs=0.01)
+        assert [r["sku"] for r in margin["items"]] == ["SKU-A", "SKU-B", "SKU-C"]
+
+    async def test_marketplace_filter(
+        self, client, db_session, test_user, wb_shop, auth_headers
+    ):
+        await seed_dashboard_abc_products(db_session, test_user, wb_shop)
+        ozon_shop = Shop(
+            id=uuid.uuid4(),
+            user_id=test_user.id,
+            marketplace=Marketplace.ozon,
+            name="Ozon ABC Shop",
+            credentials={},
+        )
+        db_session.add(ozon_shop)
+        await db_session.flush()
+        await make_product(db_session, test_user, ozon_shop, "SKU-O", 100)
+        await make_sale(db_session, ozon_shop, "SKU-O", datetime(2026, 7, 8), 700, 5)
+        await db_session.commit()
+
+        data = await self._get(client, auth_headers, marketplace="ozon")
+        assert [r["sku"] for r in data["items"]] == ["SKU-O"]
+        assert data["abc"]["summary"] == {"A": 0, "B": 0, "C": 1}
+
+        data = await self._get(client, auth_headers, marketplace="all")
+        assert {r["sku"] for r in data["items"]} == {"SKU-A", "SKU-B", "SKU-C", "SKU-O"}

@@ -43,6 +43,12 @@ export const dashboard = {
     if (endDate) url += `&end_date=${endDate}`;
     return api(url);
   },
+  getAbc: (period = 'today', marketplace = 'all', startDate = null, endDate = null) => {
+    let url = `/dashboard/abc?period=${period}&marketplace=${marketplace}`;
+    if (startDate) url += `&start_date=${startDate}`;
+    if (endDate) url += `&end_date=${endDate}`;
+    return api(url);
+  },
 };
 
 export const reports = {
