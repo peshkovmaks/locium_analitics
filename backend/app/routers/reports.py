@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import FinanceTransaction, Product, Sale, Shop, User
+from app.models import FinanceTransaction, Sale, Shop, User
 from app.services.metrics import (
     buyer_revenue,
     gross_revenue,
@@ -43,6 +43,7 @@ from app.services.metrics import (
     signed_finance_amount,
     to_decimal,
 )
+from app.services.sku_resolver import SkuResolver
 
 router = APIRouter()
 
@@ -253,14 +254,7 @@ async def _report_data(
         .scalars()
         .all()
     )
-    products = {
-        product.sku: product
-        for product in (
-            await db.execute(select(Product).where(Product.user_id == user.id))
-        )
-        .scalars()
-        .all()
-    }
+    resolver = await SkuResolver.create(db, user.id, shop_ids)
     ozon_ids = [shop.id for shop in shops if shop.marketplace.value == "ozon"]
     finance = []
     if ozon_ids:
@@ -318,15 +312,11 @@ async def _report_data(
                     expense_structure[key] += max(
                         to_decimal(getattr(sale, key)), Decimal(0)
                     )
-        cost = sum(
-            (
-                to_decimal(products[sale.external_sku].cost_price)
-                * (sale.quantity or 0)
-                for sale in mp_sales
-                if sale.external_sku in products
-            ),
-            Decimal(0),
-        )
+        cost = Decimal(0)
+        for sale in mp_sales:
+            product = resolver.resolve(sale.shop_id, sale.external_sku)
+            if product is not None:
+                cost += to_decimal(product.cost_price) * (sale.quantity or 0)
         total_expenses += expenses
         total_cost += cost
         by_mp.append(
@@ -367,19 +357,20 @@ async def _report_data(
             "shared_expenses": Decimal(0),
         }
     )
+    def _canonical_key(sale: Sale) -> str:
+        """Aggregate key: canonical product sku, or the bare external SKU."""
+        product = resolver.resolve(sale.shop_id, sale.external_sku)
+        return product.sku if product is not None else sale.external_sku
+
     for sale in regular + returns:
-        row = top_products[sale.external_sku]
-        unit_row = unit_economics[sale.external_sku]
-        row["name"] = (
-            products[sale.external_sku].name
-            if sale.external_sku in products
-            else sale.external_sku
-        )
+        key = _canonical_key(sale)
+        row = top_products[key]
+        unit_row = unit_economics[key]
+        product = resolver.resolve(sale.shop_id, sale.external_sku)
+        row["name"] = product.name if product is not None else sale.external_sku
         unit_row["name"] = row["name"]
         unit_row["cost"] = (
-            to_decimal(products[sale.external_sku].cost_price)
-            if sale.external_sku in products
-            else Decimal(0)
+            to_decimal(product.cost_price) if product is not None else Decimal(0)
         )
         if sale.is_return:
             unit_row["returns_revenue"] += gross_revenue(sale)
@@ -406,12 +397,12 @@ async def _report_data(
         shop_revenue = sum((gross_revenue(sale) for sale in shop_sales), Decimal(0))
         if not shop_revenue:
             continue
-        for sku in {sale.external_sku for sale in shop_sales}:
+        for key in {_canonical_key(sale) for sale in shop_sales}:
             sku_revenue = sum(
                 (
                     gross_revenue(sale)
                     for sale in shop_sales
-                    if sale.external_sku == sku
+                    if _canonical_key(sale) == key
                 ),
                 Decimal(0),
             )

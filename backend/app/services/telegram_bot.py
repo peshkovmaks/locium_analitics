@@ -12,13 +12,13 @@ from app.models import (
     Shop,
     Sale,
     Stock,
-    Product,
     Advert,
     SyncLog,
     ShopBalance,
     FinanceTransaction,
 )
 from app.config import get_settings
+from app.services.sku_resolver import SkuResolver
 from app.services.metrics import (
     to_decimal as _to_decimal,
     sale_expenses as _sale_expenses,
@@ -147,11 +147,8 @@ class TelegramBotService:
         sales_no_return = [s for s in sales if not s.is_return]
         returns = [s for s in sales if s.is_return]
 
-        # Products for cost and names
-        products_result = await db.execute(
-            select(Product).where(Product.user_id == user_id)
-        )
-        products = {p.sku: p for p in products_result.scalars().all()}
+        # Products for cost and names (canonical, merge-aware)
+        resolver = await SkuResolver.create(db, user_id, shop_ids)
 
         # Ozon expenses come from finance transactions, not sale columns
         ozon_exp = await self._ozon_finance_expenses(
@@ -168,11 +165,11 @@ class TelegramBotService:
         total_expenses = sum(
             _sale_expenses(s) for s in sales_no_return if s.shop_id not in ozon_exp
         ) + sum(ozon_exp.values())
-        total_cost = sum(
-            _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
-            for s in sales_no_return
-            if s.external_sku in products
-        )
+        total_cost = Decimal(0)
+        for s in sales_no_return:
+            product = resolver.resolve(s.shop_id, s.external_sku)
+            if product is not None:
+                total_cost += _to_decimal(product.cost_price) * (s.quantity or 0)
         gross = total_revenue - total_expenses
         net = gross - total_cost
         margin = (net / total_revenue * 100) if total_revenue > 0 else Decimal(0)
@@ -194,11 +191,11 @@ class TelegramBotService:
                 if shop.id in ozon_exp
                 else sum(_sale_expenses(s) for s in mp_sales)
             )
-            cost = sum(
-                _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
-                for s in mp_sales
-                if s.external_sku in products
-            )
+            cost = Decimal(0)
+            for s in mp_sales:
+                product = resolver.resolve(s.shop_id, s.external_sku)
+                if product is not None:
+                    cost += _to_decimal(product.cost_price) * (s.quantity or 0)
             net_mp = rev - exp - cost
             mp_data[shop.id] = {
                 "name": mp_names.get(shop.marketplace.value, shop.marketplace.value),
@@ -212,7 +209,7 @@ class TelegramBotService:
         # Top 3 products by units sold
         product_units: Dict[str, int] = {}
         for s in sales_no_return:
-            p = products.get(s.external_sku)
+            p = resolver.resolve(s.shop_id, s.external_sku)
             name = p.name if p else s.external_sku
             product_units[name] = product_units.get(name, 0) + (s.quantity or 0)
 
@@ -325,10 +322,7 @@ class TelegramBotService:
                 transaction.shop_id, Decimal(0)
             ) - signed_finance_amount(transaction)
 
-        products_result = await db.execute(
-            select(Product).where(Product.user_id == user_id)
-        )
-        products = {product.sku: product for product in products_result.scalars().all()}
+        resolver = await SkuResolver.create(db, user_id, shop_ids)
 
         def shop_metrics(shop: Shop) -> Dict[str, Decimal]:
             shop_sales = [sale for sale in sales if sale.shop_id == shop.id]
@@ -344,16 +338,15 @@ class TelegramBotService:
                 expenses = sum(
                     (_sale_expenses(sale) for sale in shop_sales), Decimal(0)
                 )
-            cost = sum(
-                (
-                    _to_decimal(products[sale.external_sku].cost_price)
-                    * (sale.quantity or 0)
-                    * (-1 if sale.is_return else 1)
-                    for sale in shop_sales
-                    if sale.external_sku in products
-                ),
-                Decimal(0),
-            )
+            cost = Decimal(0)
+            for sale in shop_sales:
+                product = resolver.resolve(sale.shop_id, sale.external_sku)
+                if product is not None:
+                    cost += (
+                        _to_decimal(product.cost_price)
+                        * (sale.quantity or 0)
+                        * (-1 if sale.is_return else 1)
+                    )
             gross_profit = revenue - expenses
             net_profit = gross_profit - cost
             return {

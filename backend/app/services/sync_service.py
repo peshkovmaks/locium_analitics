@@ -50,6 +50,8 @@ class SyncService:
         """
         from app.utils.encryption import decrypt_dict
 
+        sync_started_at = datetime.utcnow()
+
         adapter = AdapterFactory.create(
             shop.marketplace.value,
             str(shop.id),
@@ -110,6 +112,8 @@ class SyncService:
             logger.warning("Failed to sync balance for shop %s: %s", shop.id, e)
             results["balance"] = {"status": "error", "count": 0, "message": str(e)}
 
+        # Stocks are deliberately not added to all_items: WB warehouse_remains
+        # uses nmId, which differs from the supplierArticle used by orders.
         all_items = []
 
         try:
@@ -144,15 +148,25 @@ class SyncService:
 
             # 2. Sync stocks
             try:
-                await self._clear_stocks(shop.id)
                 stocks = await adapter.get_stocks()
-                await self._save_stocks(shop.id, stocks)
-                # Do not enrich products from stocks: WB warehouse_remains uses
-                # nmId, which differs from the supplierArticle used by orders.
+                if stocks:
+                    # Replace the snapshot only after a successful load.
+                    await self._clear_stocks(shop.id)
+                    await self._save_stocks(shop.id, stocks)
+                else:
+                    # An empty result is ambiguous: it can mean the shop truly
+                    # has no stock left, or that the adapter skipped the fetch
+                    # (e.g. WB returns [] with a warning while stocks are
+                    # disabled). Keep the previous snapshot to avoid wiping
+                    # good data on a no-op sync.
+                    logger.warning(
+                        "Stocks for shop %s: empty result from adapter, keeping previous snapshot",
+                        shop.id,
+                    )
                 results["stocks"] = {
                     "status": "success",
                     "count": len(stocks),
-                    "message": None,
+                    "message": None if stocks else "Empty result, previous snapshot kept",
                 }
             except RateLimitExceeded as e:
                 results["stocks"] = {
@@ -269,16 +283,35 @@ class SyncService:
 
         # Persist sync log
         try:
+            log_sections = {
+                k: v
+                for k, v in results.items()
+                if k
+                in ("orders", "stocks", "adverts", "prices", "finance", "balance")
+            }
+            # Sections that failed or were rate-limited received nothing
+            # savable; their count stays 0 either way.
+            rows_received = sum(s.get("count", 0) for s in log_sections.values())
+            rows_saved = sum(
+                s.get("count", 0)
+                for s in log_sections.values()
+                if s.get("status") == "success"
+            )
             log = SyncLog(
                 shop_id=shop.id,
                 status=results["status"],
-                sections={
-                    k: v
-                    for k, v in results.items()
-                    if k
-                    in ("orders", "stocks", "adverts", "prices", "finance", "balance")
-                },
+                sections=log_sections,
                 message=results.get("message"),
+                date_from=date_from.date() if date_from else None,
+                date_to=date_to.date() if date_to else None,
+                rows_received=rows_received,
+                rows_saved=rows_saved,
+                started_at=sync_started_at,
+                is_partial=results["status"] != "success"
+                or any(
+                    s.get("status") not in ("success", "skipped")
+                    for s in log_sections.values()
+                ),
             )
             self.db.add(log)
             await self.db.commit()
@@ -452,7 +485,6 @@ class SyncService:
                 shop_id=shop_id,
                 date=datetime.utcnow(),
                 external_sku=item["external_sku"],
-                external_id=item.get("external_id"),
                 warehouse=item.get("warehouse", "Unknown"),
                 quantity=item["quantity"],
                 in_way=item.get("in_way", 0),
@@ -986,9 +1018,23 @@ class SyncService:
                     date_to=chunk_end,
                 )
                 overall["chunks"] += 1
-                overall["sales"] += result.get("sales", 0)
+                # sync_shop reports the number of loaded orders/sales under
+                # the "orders" section.
+                orders_section = result.get("orders") or {}
+                overall["sales"] += orders_section.get("count", 0)
                 if result.get("status") != "success":
                     overall["errors"].append(result.get("message"))
+                # sync_shop keeps shop-level status "success" when only some
+                # sections failed, so inspect the sections as well — a chunk
+                # with failed sections is an incomplete chunk.
+                for section_name, section in result.items():
+                    if (
+                        isinstance(section, dict)
+                        and section.get("status") in ("error", "rate_limited")
+                    ):
+                        overall["errors"].append(
+                            f"{section_name}: {section.get('message')}"
+                        )
             except Exception as e:
                 overall["errors"].append(str(e))
                 # Cool down before the next chunk to avoid rate-limit cascades

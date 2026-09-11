@@ -5,6 +5,7 @@ from sqlalchemy import (
     String,
     Integer,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Enum,
@@ -88,6 +89,12 @@ class SyncLog(Base):
     status = Column(String(20), nullable=False, default="success")
     sections = Column(JSONB, default=dict)
     message = Column(Text, nullable=True)
+    date_from = Column(Date, nullable=True)
+    date_to = Column(Date, nullable=True)
+    rows_received = Column(Integer, nullable=True)
+    rows_saved = Column(Integer, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    is_partial = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     shop = relationship("Shop", back_populates="sync_logs")

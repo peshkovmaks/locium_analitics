@@ -11,7 +11,6 @@ from app.database import get_db
 from app.models import (
     User,
     Shop,
-    Product,
     Sale,
     Stock,
     Advert,
@@ -29,6 +28,7 @@ from app.schemas import (
     UnitEconomicsMarketplaceRow,
     ProductDashboardRow,
     DailyTrendRow,
+    CostCoverage,
 )
 from app.auth import get_current_user
 from app.services.metrics import (
@@ -39,6 +39,8 @@ from app.services.metrics import (
     actual_revenue as _actual_revenue,
     signed_finance_amount as _signed_finance_amount,
 )
+from app.services.sku_resolver import SkuResolver
+from app.services.telegram_bot import WEEKLY_REPORT_DELAY_DAYS
 
 router = APIRouter()
 
@@ -102,7 +104,7 @@ def _shop_ads(shop_id, mp: str, sales, finance_transactions) -> Decimal:
 
 
 def _calc_period_kpis(
-    sales, returns, finance_transactions, adverts, shops, products
+    sales, returns, finance_transactions, adverts, shops, resolver: SkuResolver
 ) -> Dict[str, Decimal]:
     total_revenue = sum(_gross_revenue(s) for s in sales) - sum(
         _gross_revenue(r) for r in returns
@@ -119,10 +121,17 @@ def _calc_period_kpis(
     )
     total_gross = total_revenue - total_expenses
     total_cost = Decimal(0)
+    cost_covered_revenue = Decimal(0)
+    cost_missing_revenue = Decimal(0)
+    sales_with_cost = 0
     for s in sales:
-        sku = s.external_sku
-        if sku in products:
-            total_cost += _to_decimal(products[sku].cost_price) * (s.quantity or 0)
+        product = resolver.resolve(s.shop_id, s.external_sku)
+        if product is not None and _to_decimal(product.cost_price) > 0:
+            total_cost += _to_decimal(product.cost_price) * (s.quantity or 0)
+            cost_covered_revenue += _gross_revenue(s)
+            sales_with_cost += 1
+        else:
+            cost_missing_revenue += _gross_revenue(s)
     total_net = total_gross - total_cost
     drr = (total_ads / total_revenue * 100) if total_revenue > 0 else Decimal(0)
     return {
@@ -131,6 +140,9 @@ def _calc_period_kpis(
         "gross": total_gross,
         "net": total_net,
         "drr": drr,
+        "cost_covered_revenue": cost_covered_revenue,
+        "cost_missing_revenue": cost_missing_revenue,
+        "sales_with_cost": sales_with_cost,
     }
 
 
@@ -289,15 +301,9 @@ async def get_dashboard(
     )
     adverts = adverts_result.scalars().all()
 
-    # Get products
-    products_result = await db.execute(
-        select(Product).where(Product.user_id == current_user.id)
-    )
-    products = {}
-    for p in products_result.scalars().all():
-        products[p.sku] = p
-        if p.canonical_sku and p.canonical_sku != p.sku:
-            products[p.canonical_sku] = p
+    # Product resolver: (shop_id, external_sku) -> canonical Product via
+    # ProductShopMapping, with a fallback to a direct sku/canonical_sku match.
+    resolver = await SkuResolver.create(db, current_user.id, shop_ids)
 
     # Get stocks
     stocks_result = await db.execute(select(Stock).where(Stock.shop_id.in_(shop_ids)))
@@ -333,7 +339,7 @@ async def get_dashboard(
 
     # Calculate KPIs for the current period
     current = _calc_period_kpis(
-        sales, returns, finance_transactions, adverts, shops, products
+        sales, returns, finance_transactions, adverts, shops, resolver
     )
     total_revenue = current["revenue"]
     total_actual_revenue = current["actual_revenue"]
@@ -394,7 +400,7 @@ async def get_dashboard(
         prev_finance_transactions,
         prev_adverts,
         shops,
-        products,
+        resolver,
     )
 
     def _wow_pct(cur: Decimal, prev: Decimal) -> float:
@@ -547,11 +553,11 @@ async def get_dashboard(
                 )
                 day_ads += sum(_to_decimal(s.advertising) for s in shop_day_sales)
         day_gross = day_revenue - day_expenses
-        day_cost = sum(
-            _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
-            for s in day_sales
-            if s.external_sku in products
-        )
+        day_cost = Decimal(0)
+        for s in day_sales:
+            product = resolver.resolve(s.shop_id, s.external_sku)
+            if product is not None:
+                day_cost += _to_decimal(product.cost_price) * (s.quantity or 0)
         day_net = day_gross - day_cost
         day_drr = float(day_ads / day_revenue * 100) if day_revenue > 0 else 0.0
 
@@ -602,11 +608,11 @@ async def get_dashboard(
         mp_expenses = _shop_expenses(shop.id, mp)
         mp_ads = _shop_ads(shop.id, mp)
         mp_gross = mp_revenue - mp_expenses
-        mp_cost = sum(
-            _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
-            for s in mp_sales
-            if s.external_sku in products
-        )
+        mp_cost = Decimal(0)
+        for s in mp_sales:
+            product = resolver.resolve(s.shop_id, s.external_sku)
+            if product is not None:
+                mp_cost += _to_decimal(product.cost_price) * (s.quantity or 0)
         mp_net = mp_gross - mp_cost
         mp_drr = (mp_ads / mp_revenue * 100) if mp_revenue > 0 else Decimal(0)
 
@@ -663,11 +669,13 @@ async def get_dashboard(
         )
         exp = _shop_expenses(shop.id, mp)
         gross = rev - exp
-        cost = sum(
-            _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
-            for s in sales
-            if s.shop_id == shop.id and s.external_sku in products
-        )
+        cost = Decimal(0)
+        for s in sales:
+            if s.shop_id != shop.id:
+                continue
+            product = resolver.resolve(s.shop_id, s.external_sku)
+            if product is not None:
+                cost += _to_decimal(product.cost_price) * (s.quantity or 0)
         net = gross - cost
         ads = _shop_ads(shop.id, mp)
         drr_mp = (ads / rev * 100) if rev > 0 else Decimal(0)
@@ -726,9 +734,9 @@ async def get_dashboard(
 
     product_unit_map: Dict[str, dict] = {}
     for (external_sku, shop_id), s_sales in sku_sales.items():
-        if external_sku not in products:
+        p = resolver.resolve(shop_id, external_sku)
+        if p is None:
             continue
-        p = products[external_sku]
         shop = next((sh for sh in shops if sh.id == shop_id), None)
         if not shop:
             continue
@@ -833,11 +841,27 @@ async def get_dashboard(
             reverse=True,
         )
 
-    # Product dashboard rows
+    # Product dashboard rows — sales/returns/stocks grouped by canonical product
+    sales_by_product: Dict[str, list] = {}
+    returns_by_product: Dict[str, list] = {}
+    stocks_by_product: Dict[str, list] = {}
+    for s in sales:
+        product = resolver.resolve(s.shop_id, s.external_sku)
+        if product is not None:
+            sales_by_product.setdefault(str(product.id), []).append(s)
+    for r in returns:
+        product = resolver.resolve(r.shop_id, r.external_sku)
+        if product is not None:
+            returns_by_product.setdefault(str(product.id), []).append(r)
+    for st in stocks:
+        product = resolver.resolve(st.shop_id, st.external_sku)
+        if product is not None:
+            stocks_by_product.setdefault(str(product.id), []).append(st)
+
     product_rows: List[ProductDashboardRow] = []
-    for p in products.values():
-        p_sales = [s for s in sales if s.external_sku == p.sku]
-        p_returns = [r for r in returns if r.external_sku == p.sku]
+    for p in resolver.products:
+        p_sales = sales_by_product.get(str(p.id), [])
+        p_returns = returns_by_product.get(str(p.id), [])
         p_revenue = sum(_gross_revenue(s) for s in p_sales) - sum(
             _gross_revenue(r) for r in p_returns
         )
@@ -856,7 +880,7 @@ async def get_dashboard(
         p_drr = (p_ads / p_revenue * 100) if p_revenue > 0 else Decimal(0)
         p_avg_price = (p_actual_revenue / p_qty) if p_qty > 0 else Decimal(0)
 
-        p_stocks = [st for st in stocks if st.external_sku == p.sku]
+        p_stocks = stocks_by_product.get(str(p.id), [])
         total_stock = sum(st.quantity for st in p_stocks)
 
         alert_price = (
@@ -888,7 +912,7 @@ async def get_dashboard(
         product_rows = []
         for row in official_ozon["unit_economics"]:
             existing = existing_products.get(row["sku"])
-            product = products.get(row["sku"])
+            product = resolver.resolve_sku(row["sku"])
             product_rows.append(
                 ProductDashboardRow(
                     sku=row["sku"],
@@ -932,6 +956,13 @@ async def get_dashboard(
                 AlertItem(
                     type="danger",
                     text=f"{p_row.name}: цена {p_row.avg_price:.0f}₽ ниже минимальной {p_row.min_price:.0f}₽",
+                )
+            )
+        if p_row.alert_stock and p_row.total_stock > 0:
+            alerts.append(
+                AlertItem(
+                    type="warning",
+                    text=f"{p_row.name}: остаток {p_row.total_stock} шт. ниже порога {ALERT_THRESHOLDS['min_stock']}",
                 )
             )
 
@@ -980,6 +1011,29 @@ async def get_dashboard(
             Decimal("0"),
         )
 
+    # --- Cost coverage & profit reliability ---
+    cost_coverage = None
+    covered = current["cost_covered_revenue"]
+    missing = current["cost_missing_revenue"]
+    if sales or returns:
+        coverage_total = covered + missing
+        cost_coverage = CostCoverage(
+            sales_total=len(sales),
+            sales_with_cost=current["sales_with_cost"],
+            revenue_covered=covered,
+            revenue_uncovered=missing,
+            coverage_percent=(
+                float(covered / coverage_total * 100) if coverage_total > 0 else 100.0
+            ),
+        )
+    # Marketplace finance data is confirmed with a delay; a period that ended
+    # before the cutoff is considered confirmed, a fresher one is estimated.
+    profit_status = (
+        "confirmed"
+        if end_dt < now - timedelta(days=WEEKLY_REPORT_DELAY_DAYS)
+        else "estimated"
+    )
+
     return DashboardData(
         kpi=kpi,
         order_stats=OrderStats(
@@ -1010,4 +1064,6 @@ async def get_dashboard(
         products=product_rows,
         daily_trend=daily_trend,
         expense_structure=expense_structure,
+        cost_coverage=cost_coverage,
+        profit_status=profit_status,
     )

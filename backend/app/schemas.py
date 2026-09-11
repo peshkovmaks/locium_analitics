@@ -247,6 +247,20 @@ class OrderStats(BaseModel):
     avg_items_per_order_trend: List[float] = []
 
 
+class CostCoverage(BaseModel):
+    """How much of the period's sales are matched to a product with a cost price.
+
+    Revenue without cost coverage means the profit for those sales is computed
+    without deducting cost of goods — a reliability signal, not just a stat.
+    """
+
+    sales_total: int
+    sales_with_cost: int
+    revenue_covered: Decimal
+    revenue_uncovered: Decimal
+    coverage_percent: float
+
+
 class DashboardData(BaseModel):
     kpi: KPIData
     order_stats: OrderStats
@@ -256,3 +270,7 @@ class DashboardData(BaseModel):
     products: List[ProductDashboardRow]
     daily_trend: List[DailyTrendRow] = []
     expense_structure: Dict[str, Decimal] = {}
+    cost_coverage: Optional[CostCoverage] = None
+    # "confirmed" when the period is older than the marketplace finance
+    # confirmation delay; "estimated" for recent/ongoing periods.
+    profit_status: str = "estimated"

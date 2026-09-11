@@ -48,11 +48,12 @@ function Badge({ children, color }) {
   );
 }
 
-function KPICard({ label, value, wow, wowColor, breakdown, sparklineData, sparklineColor = '#3b82f6' }) {
+function KPICard({ label, value, wow, wowColor, breakdown, badge, sparklineData, sparklineColor = '#3b82f6' }) {
   return (
     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
       <p className="text-sm text-gray-500 mb-1">{label}</p>
       <p className="text-2xl font-bold text-gray-900">{value}</p>
+      {badge && <div className="mt-1.5">{badge}</div>}
       {breakdown && (
         <div className="mt-2 space-y-1 text-xs text-gray-600">
           {breakdown.map((item) => (
@@ -988,6 +989,13 @@ export default function Dashboard() {
         <KPICard
           label="Чистая прибыль"
           value={formatMoney(kpi.net_profit)}
+          badge={
+            data.profit_status === 'confirmed' ? (
+              <Badge color="#16a34a">подтверждено</Badge>
+            ) : (
+              <Badge color="#d97706">предварительно</Badge>
+            )
+          }
           wow={`${kpi.net_wow > 0 ? '+' : ''}${kpi.net_wow}% к прошлому периоду`}
           wowColor={kpi.net_wow >= 0 ? 'text-green-600' : 'text-red-600'}
           breakdown={kpiBreakdown.map((mp) => ({
@@ -1016,6 +1024,18 @@ export default function Dashboard() {
           sparklineColor="#ef4444"
         />
       </div>
+
+      {/* Cost coverage warning: profit for sales without a cost price is unreliable */}
+      {data.cost_coverage && Number(data.cost_coverage.revenue_uncovered) > 0 && (
+        <div className="flex items-start gap-2 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <span className="font-bold leading-5">!</span>
+          <span>
+            {(100 - Number(data.cost_coverage.coverage_percent)).toFixed(0)}% выручки (
+            {formatMoney(data.cost_coverage.revenue_uncovered)}) посчитано без себестоимости —
+            прибыль по этим продажам недостоверна. Укажите себестоимость в разделе «Товары».
+          </span>
+        </div>
+      )}
 
       {/* Order stats */}
       {data.order_stats && (
