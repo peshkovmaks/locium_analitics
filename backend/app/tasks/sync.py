@@ -1,6 +1,7 @@
 """Celery tasks for background jobs."""
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -11,6 +12,8 @@ from app.config import get_settings
 from app.services.sync_service import SyncService
 from app.services.telegram_bot import TelegramBotService
 from app.models import User
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -84,7 +87,9 @@ async def _async_sync_ym_key_indicators():
         end = datetime.utcnow()
         # API history is capped at ~90 days; align to month start so monthly
         # periods are distributed whole.
-        start = (end - timedelta(days=90)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start = (end - timedelta(days=90)).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
 
         for shop in shops:
             try:
@@ -98,12 +103,18 @@ async def _async_sync_ym_key_indicators():
                     continue
                 reports = await adapter.get_key_indicators_report(start, end)
                 if reports:
-                    await sync_service._update_finance_data_by_period(shop.id, reports, start, end)
+                    await sync_service._update_finance_data_by_period(
+                        shop.id, reports, start, end
+                    )
                 await db.commit()
-                print(f"YM key-indicators sync: shop {shop.id}: {len(reports or [])} period rows")
+                print(
+                    f"YM key-indicators sync: shop {shop.id}: {len(reports or [])} period rows"
+                )
             except Exception as e:
                 await db.rollback()
-                print(f"YM key-indicators sync failed for shop {shop.id}: {type(e).__name__}: {e}")
+                print(
+                    f"YM key-indicators sync failed for shop {shop.id}: {type(e).__name__}: {e}"
+                )
 
 
 @celery_app.task
@@ -153,7 +164,9 @@ async def _async_sync_wb_finance():
                     continue
                 finance = await adapter.get_finance_report(start, end)
                 if finance:
-                    await sync_service._update_finance_data(shop.id, finance, start, end)
+                    await sync_service._update_finance_data(
+                        shop.id, finance, start, end
+                    )
                     await sync_service._save_finance_transactions(
                         shop.id, shop.marketplace, finance, start, end
                     )
@@ -161,13 +174,36 @@ async def _async_sync_wb_finance():
                 print(f"WB finance sync: shop {shop.id}: {len(finance or [])} rows")
             except Exception as e:
                 await db.rollback()
-                print(f"WB finance sync failed for shop {shop.id}: {type(e).__name__}: {e}")
+                print(
+                    f"WB finance sync failed for shop {shop.id}: {type(e).__name__}: {e}"
+                )
 
 
 @celery_app.task
 def send_morning_report_task():
     """Send morning report at 9:00."""
     asyncio.run(_async_send_morning_reports())
+
+
+@celery_app.task
+def send_weekly_report_task():
+    """Send the delayed complete weekly report on Monday at 10:00."""
+    asyncio.run(_async_send_weekly_reports())
+
+
+async def _async_send_weekly_reports():
+    async with _task_session() as db:
+        bot = TelegramBotService()
+        result = await db.execute(select(User))
+        users = result.scalars().all()
+
+        for user in users:
+            try:
+                sent = await bot.send_weekly_report(db, str(user.id))
+                if not sent:
+                    logger.error("Weekly report was not sent to user %s", user.id)
+            except Exception:
+                logger.exception("Failed to send weekly report to user %s", user.id)
 
 
 async def _async_send_morning_reports():
@@ -178,9 +214,11 @@ async def _async_send_morning_reports():
 
         for user in users:
             try:
-                await bot.send_morning_report(db, str(user.id))
-            except Exception as e:
-                print(f"Failed to send morning report to user {user.id}: {e}")
+                sent = await bot.send_morning_report(db, str(user.id))
+                if not sent:
+                    logger.error("Morning report was not sent to user %s", user.id)
+            except Exception:
+                logger.exception("Failed to send morning report to user %s", user.id)
 
 
 @celery_app.task
@@ -197,12 +235,16 @@ async def _async_check_alerts():
         bot = TelegramBotService()
 
         # Check price alerts
-        result = await db.execute(select(ShopProduct).where(ShopProduct.is_active == True))
+        result = await db.execute(
+            select(ShopProduct).where(ShopProduct.is_active == True)
+        )
         shop_products = result.scalars().all()
 
         for sp in shop_products:
             # Get product
-            product_result = await db.execute(select(Product).where(Product.id == sp.product_id))
+            product_result = await db.execute(
+                select(Product).where(Product.id == sp.product_id)
+            )
             product = product_result.scalar_one_or_none()
             if not product:
                 continue
@@ -215,18 +257,20 @@ async def _async_check_alerts():
 
             # Get latest stock/price
             stock_result = await db.execute(
-                select(Stock).where(
+                select(Stock)
+                .where(
                     Stock.shop_id == shop.id,
                     Stock.external_sku == sp.external_sku,
-                ).order_by(Stock.date.desc()).limit(1)
+                )
+                .order_by(Stock.date.desc())
+                .limit(1)
             )
             stock = stock_result.scalar_one_or_none()
 
             # Check low stock
             if stock and stock.quantity < 10:
                 await bot.send_stock_alert(
-                    product.sku, product.name,
-                    shop.marketplace.value, stock.quantity
+                    product.sku, product.name, shop.marketplace.value, stock.quantity
                 )
 
         # Check DRR alerts (simplified — would need actual advert data)

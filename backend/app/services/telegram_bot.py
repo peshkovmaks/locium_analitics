@@ -2,23 +2,36 @@
 
 from datetime import datetime, timedelta
 from decimal import Decimal
+import logging
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from app.models import User, Shop, Sale, Stock, Product, Advert, SyncLog, ShopBalance, FinanceTransaction
+from app.models import (
+    User,
+    Shop,
+    Sale,
+    Stock,
+    Product,
+    Advert,
+    SyncLog,
+    ShopBalance,
+    FinanceTransaction,
+)
 from app.config import get_settings
 from app.services.metrics import (
     to_decimal as _to_decimal,
     sale_expenses as _sale_expenses,
     gross_revenue,
     buyer_revenue,
+    signed_finance_amount,
 )
 
 # Try to import telegram bot, but don't fail if not installed
 try:
     from telegram import Bot
     from telegram.constants import ParseMode
+
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
@@ -27,10 +40,17 @@ except ImportError:
 # In-memory alert throttle: (alert_type, sku, marketplace) -> last sent time.
 # Prevents hourly Celery checks from re-sending the same alert every run.
 _alert_throttle: Dict[tuple, datetime] = {}
+logger = logging.getLogger(__name__)
+
+# The weekly report deliberately uses a two-day cutoff so the latest complete
+# finance period is available for Ozon and Yandex Market.
+MARKETPLACE_FINANCE_DELAY_DAYS = {"wb": 2, "ozon": 2, "ym": 2}
+WEEKLY_REPORT_DELAY_DAYS = max(MARKETPLACE_FINANCE_DELAY_DAYS.values())
 
 
 class TelegramBotService:
     """Service for sending Telegram notifications."""
+
     def __init__(self):
         self.settings = get_settings()
         self.bot: Optional[Any] = None
@@ -69,7 +89,9 @@ class TelegramBotService:
         )
         by_shop: Dict[Any, Decimal] = {}
         for t in result.scalars().all():
-            by_shop[t.shop_id] = by_shop.get(t.shop_id, Decimal(0)) + _to_decimal(t.amount)
+            by_shop[t.shop_id] = by_shop.get(t.shop_id, Decimal(0)) + _to_decimal(
+                t.amount
+            )
         return by_shop
 
     async def send_morning_report(self, db: AsyncSession, user_id: str) -> bool:
@@ -82,6 +104,11 @@ class TelegramBotService:
         - Current balances
         """
         if not self.bot or not self.settings.telegram_chat_id:
+            logger.error(
+                "Morning report skipped: Telegram is not configured (bot=%s, chat_id=%s)",
+                bool(self.bot),
+                bool(self.settings.telegram_chat_id),
+            )
             return False
 
         # Yesterday in UTC
@@ -103,6 +130,9 @@ class TelegramBotService:
         shops = result.scalars().all()
         shop_ids = [s.id for s in shops]
         if not shop_ids:
+            logger.warning(
+                "Morning report skipped for user %s: no active shops", user_id
+            )
             return False
 
         # Sales and returns for yesterday
@@ -124,7 +154,9 @@ class TelegramBotService:
         products = {p.sku: p for p in products_result.scalars().all()}
 
         # Ozon expenses come from finance transactions, not sale columns
-        ozon_exp = await self._ozon_finance_expenses(db, shops, yesterday_start, yesterday_end)
+        ozon_exp = await self._ozon_finance_expenses(
+            db, shops, yesterday_start, yesterday_end
+        )
 
         # Calculate main metrics
         total_revenue = sum(gross_revenue(s) for s in sales_no_return)
@@ -133,10 +165,9 @@ class TelegramBotService:
         total_orders = len(sales_no_return)
         total_units = sum(s.quantity for s in sales_no_return)
 
-        total_expenses = (
-            sum(_sale_expenses(s) for s in sales_no_return if s.shop_id not in ozon_exp)
-            + sum(ozon_exp.values())
-        )
+        total_expenses = sum(
+            _sale_expenses(s) for s in sales_no_return if s.shop_id not in ozon_exp
+        ) + sum(ozon_exp.values())
         total_cost = sum(
             _to_decimal(products[s.external_sku].cost_price) * (s.quantity or 0)
             for s in sales_no_return
@@ -185,9 +216,9 @@ class TelegramBotService:
             name = p.name if p else s.external_sku
             product_units[name] = product_units.get(name, 0) + (s.quantity or 0)
 
-        top_products = sorted(
-            product_units.items(), key=lambda x: x[1], reverse=True
-        )[:3]
+        top_products = sorted(product_units.items(), key=lambda x: x[1], reverse=True)[
+            :3
+        ]
 
         # Current balances
         balances_result = await db.execute(
@@ -241,11 +272,171 @@ class TelegramBotService:
                 parse_mode=ParseMode.HTML if TELEGRAM_AVAILABLE else None,
             )
             return True
-        except Exception as e:
-            print(f"Failed to send morning report: {e}")
+        except Exception:
+            logger.exception("Failed to send morning report for user %s", user_id)
             return False
 
-    async def send_price_alert(self, sku: str, name: str, marketplace: str, current_price: Decimal, min_price: Decimal) -> bool:
+    async def send_weekly_report(self, db: AsyncSession, user_id: str) -> bool:
+        """Send a complete weekly sales, expense and profit report.
+
+        The report intentionally ends ``WEEKLY_REPORT_DELAY_DAYS`` before the
+        send date so delayed finance data from all marketplaces is included.
+        ``period_end`` is exclusive and covers one complete Monday-Sunday week.
+        """
+        if not self.bot or not self.settings.telegram_chat_id:
+            logger.error("Weekly report skipped: Telegram is not configured")
+            return False
+
+        now = datetime.utcnow()
+        period_end = (now - timedelta(days=WEEKLY_REPORT_DELAY_DAYS)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        period_start = period_end - timedelta(days=7)
+
+        shops_result = await db.execute(
+            select(Shop).where(Shop.user_id == user_id, Shop.is_active == True)
+        )
+        shops = shops_result.scalars().all()
+        if not shops:
+            logger.warning(
+                "Weekly report skipped for user %s: no active shops", user_id
+            )
+            return False
+
+        shop_ids = [shop.id for shop in shops]
+        sales_result = await db.execute(
+            select(Sale).where(
+                Sale.shop_id.in_(shop_ids),
+                Sale.date >= period_start,
+                Sale.date < period_end,
+            )
+        )
+        sales = sales_result.scalars().all()
+        finance_result = await db.execute(
+            select(FinanceTransaction).where(
+                FinanceTransaction.shop_id.in_(shop_ids),
+                FinanceTransaction.operation_date >= period_start,
+                FinanceTransaction.operation_date < period_end,
+            )
+        )
+        finance_by_shop: Dict[Any, Decimal] = {}
+        for transaction in finance_result.scalars().all():
+            finance_by_shop[transaction.shop_id] = finance_by_shop.get(
+                transaction.shop_id, Decimal(0)
+            ) - signed_finance_amount(transaction)
+
+        products_result = await db.execute(
+            select(Product).where(Product.user_id == user_id)
+        )
+        products = {product.sku: product for product in products_result.scalars().all()}
+
+        def shop_metrics(shop: Shop) -> Dict[str, Decimal]:
+            shop_sales = [sale for sale in sales if sale.shop_id == shop.id]
+            regular = [sale for sale in shop_sales if not sale.is_return]
+            revenue = sum((gross_revenue(sale) for sale in regular), Decimal(0))
+            revenue -= sum(
+                (gross_revenue(sale) for sale in shop_sales if sale.is_return),
+                Decimal(0),
+            )
+            if shop.marketplace.value == "ozon":
+                expenses = finance_by_shop.get(shop.id, Decimal(0))
+            else:
+                expenses = sum(
+                    (_sale_expenses(sale) for sale in shop_sales), Decimal(0)
+                )
+            cost = sum(
+                (
+                    _to_decimal(products[sale.external_sku].cost_price)
+                    * (sale.quantity or 0)
+                    * (-1 if sale.is_return else 1)
+                    for sale in shop_sales
+                    if sale.external_sku in products
+                ),
+                Decimal(0),
+            )
+            gross_profit = revenue - expenses
+            net_profit = gross_profit - cost
+            return {
+                "revenue": revenue,
+                "expenses": expenses,
+                "cost": cost,
+                "gross_profit": gross_profit,
+                "net_profit": net_profit,
+                "orders": Decimal(len(regular)),
+            }
+
+        metrics = {shop.id: shop_metrics(shop) for shop in shops}
+        total_sales = {
+            key: sum((data[key] for data in metrics.values()), Decimal(0))
+            for key in ("revenue", "orders")
+        }
+        financial_metrics = [
+            data
+            for shop, data in zip(shops, metrics.values())
+            if shop.marketplace.value in {"ozon", "ym"}
+        ]
+        total_finance = {
+            key: sum((data[key] for data in financial_metrics), Decimal(0))
+            for key in ("revenue", "expenses", "cost", "gross_profit", "net_profit")
+        }
+        margin = (
+            total_finance["net_profit"] / total_finance["revenue"] * 100
+            if total_finance.get("revenue", 0) > 0
+            else Decimal(0)
+        )
+
+        message = f"""📊 Еженедельный отчёт за {period_start:%d.%m.%Y}–{(period_end - timedelta(days=1)):%d.%m.%Y}
+
+💰 Продажи: {self._format_money(total_sales['revenue'])}
+🧾 Заказов: {int(total_sales['orders'])}
+
+Финансовые показатели Ozon и ЯМ:
+💸 Расходы: {self._format_money(total_finance['expenses'])}
+📦 Себестоимость: {self._format_money(total_finance['cost'])}
+💳 Валовая прибыль (деньги на счет): {self._format_money(total_finance['gross_profit'])}
+✅ Чистая прибыль: {self._format_money(total_finance['net_profit'])}
+📈 Маржа: {margin:.1f}%
+
+По площадкам:
+"""
+        mp_names = {"wb": "WB", "ozon": "Ozon", "ym": "ЯМ"}
+        for shop in shops:
+            data = metrics[shop.id]
+            mp_name = mp_names.get(shop.marketplace.value, shop.marketplace.value)
+            if shop.marketplace.value == "wb":
+                message += (
+                    f"• {mp_name} ({shop.name}): продажи "
+                    f"{self._format_money(data['revenue'])}, "
+                    f"заказов {int(data['orders'])}\n"
+                )
+            else:
+                message += (
+                    f"• {mp_name} ({shop.name}): выручка "
+                    f"{self._format_money(data['revenue'])}, "
+                    f"расходы {self._format_money(data['expenses'])}, "
+                    f"валовая прибыль {self._format_money(data['gross_profit'])}, "
+                    f"чистая прибыль {self._format_money(data['net_profit'])}\n"
+                )
+
+        try:
+            await self.bot.send_message(
+                chat_id=self.settings.telegram_chat_id,
+                text=message,
+                parse_mode=ParseMode.HTML if TELEGRAM_AVAILABLE else None,
+            )
+            return True
+        except Exception:
+            logger.exception("Failed to send weekly report for user %s", user_id)
+            return False
+
+    async def send_price_alert(
+        self,
+        sku: str,
+        name: str,
+        marketplace: str,
+        current_price: Decimal,
+        min_price: Decimal,
+    ) -> bool:
         """Send alert when price drops below minimum."""
         if not self.bot or not self.settings.telegram_chat_id:
             return False
@@ -289,7 +480,9 @@ class TelegramBotService:
         except Exception:
             return False
 
-    async def send_stock_alert(self, sku: str, name: str, marketplace: str, stock: int) -> bool:
+    async def send_stock_alert(
+        self, sku: str, name: str, marketplace: str, stock: int
+    ) -> bool:
         """Send alert when stock is low."""
         if not self.bot or not self.settings.telegram_chat_id:
             return False
