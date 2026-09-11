@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 class OzonAdapter(MarketplaceAdapter):
     BASE_URL = "https://api-seller.ozon.ru"
+    PERFORMANCE_BASE_URL = "https://api-performance.ozon.ru"
 
     def __init__(self, shop_id: str, credentials: Dict[str, Any]):
         super().__init__(shop_id, credentials)
@@ -26,6 +27,29 @@ class OzonAdapter(MarketplaceAdapter):
             "Api-Key": self.api_key,
             "Content-Type": "application/json",
         }
+        self.performance_client_id = credentials.get("performance_client_id", "")
+        self.performance_access_token = credentials.get(
+            "performance_access_token", ""
+        )
+
+    @property
+    def has_performance_api(self) -> bool:
+        return bool(self.performance_client_id and self.performance_access_token)
+
+    def _performance_headers(self) -> Dict[str, str]:
+        # Never log these headers or the token itself.
+        return {
+            "Client-Id": self.performance_client_id,
+            "Authorization": f"Bearer {self.performance_access_token}",
+            "Content-Type": "application/json",
+        }
+
+    def _performance_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            base_url=self.PERFORMANCE_BASE_URL,
+            headers=self._performance_headers(),
+            timeout=30.0,
+        )
 
     def _http_client(self) -> httpx.AsyncClient:
         proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
@@ -384,13 +408,155 @@ class OzonAdapter(MarketplaceAdapter):
                 logger.warning("Ozon /v3/product/info/list failed: %s", e)
             return {}
 
+    async def _performance_get_campaigns(self) -> List[Dict[str, Any]]:
+        """List all Performance campaigns with pagination.
+
+        POST /api/client/campaign, body {"page": N, "pageSize": 100}.
+        Assumed response: {"items": [{"id": ..., "title": ..., "state": ...}],
+        ...} — paged; we stop when a page returns fewer items than pageSize.
+        """
+        page_size = 100
+        page = 1
+        campaigns: List[Dict[str, Any]] = []
+        async with self._performance_client() as client:
+            while True:
+                response = await client.post(
+                    "/api/client/campaign",
+                    json={"page": page, "pageSize": page_size},
+                )
+                response.raise_for_status()
+                data = response.json()
+                items = data.get("items") or data.get("campaigns") or []
+                campaigns.extend(items)
+                if len(items) < page_size:
+                    break
+                page += 1
+        return campaigns
+
+    async def _performance_create_report(
+        self, campaign_ids: List[Any], date_from: datetime, date_to: datetime
+    ) -> str:
+        """Order a daily statistics report; returns the report UUID."""
+        async with self._performance_client() as client:
+            response = await client.post(
+                "/api/client/statistics/daily-report",
+                json={
+                    "campaigns": list(campaign_ids),
+                    "dateFrom": date_from.strftime("%Y-%m-%d"),
+                    "dateTo": date_to.strftime("%Y-%m-%d"),
+                    "groupBy": "DATE",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+        uuid = data.get("UUID") or data.get("uuid")
+        if not uuid:
+            raise ValueError(f"Ozon Performance API returned no report UUID: {data}")
+        return str(uuid)
+
+    async def _performance_fetch_report(self, uuid: str) -> Dict[str, Any]:
+        """Fetch the report state/payload by UUID."""
+        async with self._performance_client() as client:
+            response = await client.get(
+                "/api/client/statistics/report",
+                params={"UUID": uuid},
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def get_adverts(
         self, date_from: datetime, date_to: datetime
     ) -> List[Dict[str, Any]]:
-        logger.warning(
-            "Ozon ads skipped: requires Performance API (OAuth). Seller API does not provide campaign endpoints."
-        )
-        return []
+        """Fetch ad stats via Ozon Performance API.
+
+        Flow: list campaigns, order a daily-report for the period, poll
+        GET /api/client/statistics/report until state == "OK", then parse
+        the report rows into the shared Advert contract.
+
+        Contract assumptions (verify against the real API response):
+          - Campaign list: {"items": [{"id", "title", "state"}, ...]}.
+          - daily-report create returns {"UUID": "..."}.
+          - report poll returns {"state": "OK"|"PENDING"|"PROCESSING",
+            "report": {"rows": [{"date", "campaignId", "sku", "views",
+            "clicks", "spend", "orders"}, ...]}}. Rows may omit "sku"
+            (campaign-level) and may use aliases "impressions"/"spent",
+            which we accept as fallbacks.
+        """
+        if not self.has_performance_api:
+            logger.warning(
+                "Ozon ads skipped: requires Performance API (OAuth). "
+                "Set performance_client_id and performance_access_token in shop credentials."
+            )
+            return []
+
+        try:
+            campaigns = await self._performance_get_campaigns()
+            campaign_ids = [c.get("id") for c in campaigns if c.get("id")]
+            if not campaign_ids:
+                logger.info(
+                    "Ozon Performance: no campaigns for shop %s", self.shop_id
+                )
+                return []
+
+            report_uuid = await self._performance_create_report(
+                campaign_ids, date_from, date_to
+            )
+
+            max_attempts = 10
+            poll_delay = 2.5
+            report_payload: Optional[Dict[str, Any]] = None
+            for attempt in range(1, max_attempts + 1):
+                status = await self._performance_fetch_report(report_uuid)
+                state = str(status.get("state", "")).upper()
+                if state == "OK":
+                    report_payload = status.get("report") or {}
+                    break
+                if state in ("PENDING", "PROCESSING", ""):
+                    if attempt < max_attempts:
+                        await asyncio.sleep(poll_delay)
+                        continue
+                logger.warning(
+                    "Ozon Performance report %s not ready after %d attempts "
+                    "(last state: %s), skipping adverts",
+                    report_uuid,
+                    max_attempts,
+                    state or "unknown",
+                )
+                return []
+
+            rows = (report_payload or {}).get("rows") or []
+            adverts = []
+            for row in rows:
+                day = self._parse_date(str(row.get("date", "")), date_from)
+                views = int(row.get("views") or row.get("impressions") or 0)
+                clicks = int(row.get("clicks") or 0)
+                spend = Decimal(str(row.get("spend") or row.get("spent") or 0))
+                orders = int(row.get("orders") or row.get("ordersCount") or 0)
+                ctr = (Decimal(clicks) / views * 100) if views else Decimal(0)
+                cpc = (spend / clicks) if clicks else Decimal(0)
+                cr = (Decimal(orders) / clicks * 100) if clicks else Decimal(0)
+                adverts.append(
+                    {
+                        "date": day,
+                        "campaign_id": str(row.get("campaignId") or ""),
+                        "external_sku": str(row.get("sku") or ""),
+                        "views": views,
+                        "clicks": clicks,
+                        "ctr": ctr,
+                        "cpc": cpc,
+                        "spend": spend,
+                        "orders": orders,
+                        "cr": cr,
+                    }
+                )
+            return adverts
+        except Exception as e:
+            logger.warning(
+                "Ozon Performance API failed for shop %s, adverts skipped: %s",
+                self.shop_id,
+                e,
+            )
+            return []
 
     async def get_prices(self) -> List[Dict[str, Any]]:
         try:

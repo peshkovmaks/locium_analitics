@@ -50,6 +50,14 @@ export const reports = {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
+  abc: (month) => api(`/reports/abc-classification?month=${month}`),
+  reconciliation: (month) => api(`/reports/reconciliation?month=${month}`),
+  getTarget: (month) => api(`/reports/monthly-targets/${month}`),
+  saveTarget: (month, data) => api(`/reports/monthly-targets/${month}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }),
+  planFact: (month) => api(`/reports/plan-fact?month=${month}`),
   download: async (payload) => {
     const res = await fetch(`${API_BASE}/reports/pdf`, {
       method: 'POST',
@@ -81,6 +89,13 @@ export const products = {
       method: 'POST',
       body: JSON.stringify({ source_skus: sourceSkus, target_sku: targetSku }),
     }),
+  priceHistory: (productId, dateFrom = null, dateTo = null) => {
+    const params = new URLSearchParams();
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    const qs = params.toString();
+    return api(`/products/${productId}/price-history${qs ? `?${qs}` : ''}`);
+  },
 };
 
 export const shops = {

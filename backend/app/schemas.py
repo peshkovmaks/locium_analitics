@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List, Dict
 from decimal import Decimal
 from datetime import datetime, date
@@ -60,6 +60,12 @@ class ProductMerge(BaseModel):
     target_sku: str
 
 
+class PriceRecommendation(BaseModel):
+    recommended_price: Optional[Decimal] = None
+    min_price: Optional[Decimal] = None  # текущая средняя цена продаж
+    action: str  # "raise" | "keep" | "lower"
+
+
 class ProductOut(BaseModel):
     id: UUID
     sku: str
@@ -72,6 +78,16 @@ class ProductOut(BaseModel):
     created_at: datetime
     sales_count: int = 0
     total_revenue: Decimal = Decimal("0")
+    price_recommendation: Optional[PriceRecommendation] = None
+
+    class Config:
+        from_attributes = True
+
+
+# --- Price history ---
+class PriceHistoryPoint(BaseModel):
+    price: Decimal
+    created_at: datetime
 
     class Config:
         from_attributes = True
@@ -134,6 +150,34 @@ class SyncLogOut(BaseModel):
     sections: dict
     message: Optional[str]
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# --- Monthly targets / Plan-Fact ---
+TARGET_METRICS = ("revenue", "profit", "margin", "drr", "orders", "returns", "stock")
+
+
+class MonthlyTargetIn(BaseModel):
+    targets: Dict[str, Optional[float]] = Field(default_factory=dict)
+
+    @field_validator("targets")
+    @classmethod
+    def valid_target_keys(cls, values):
+        unknown = set(values) - set(TARGET_METRICS)
+        if unknown:
+            raise ValueError(f"Unknown target metrics: {sorted(unknown)}")
+        return values
+
+
+class MonthlyTargetOut(BaseModel):
+    id: UUID
+    user_id: UUID
+    month: date
+    targets: Dict[str, Optional[float]]
+    created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True

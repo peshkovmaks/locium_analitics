@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 from typing import List, Dict, Any
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, delete, update, func, desc
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
@@ -20,6 +20,7 @@ from app.models import (
     Advert,
     Product,
     ProductShopMapping,
+    PriceHistory,
     SyncLog,
     ShopBalance,
     FinanceTransaction,
@@ -231,6 +232,7 @@ class SyncService:
                     names = {}
 
             await self._ensure_products(shop, all_items, names=names)
+            await self._save_price_history(shop, prices)
 
             # 5. Finance report
             if sync_finance:
@@ -536,6 +538,12 @@ class SyncService:
             spend_by_day[day] += spend
             spend_by_sku_day[(str(item.get("external_sku", "")), day)] += spend
 
+        if sum(spend_by_day.values()) == 0:
+            # No spend at all (e.g. YM bids/info returns spend=0 because ad
+            # costs arrive via finance reports instead) — leave Sale.advertising
+            # untouched so periodic finance-based distribution isn't wiped.
+            return
+
         # Reset advertising for the period before redistributing.
         await self.db.execute(
             update(Sale)
@@ -668,6 +676,81 @@ class SyncService:
                 external_sku=external_sku,
             )
             self.db.add(new_mapping)
+
+    async def _save_price_history(
+        self, shop: Shop, prices: List[Dict[str, Any]]
+    ) -> int:
+        """Append PriceHistory rows for changed prices.
+
+        Prices from the adapter are snapshot-style (current price per SKU), so
+        a history row is written only when the price differs from the latest
+        known one — consecutive syncs with an unchanged price add nothing.
+        """
+        if not prices:
+            return 0
+
+        # The session runs with autoflush=False: mappings created moments ago
+        # by _ensure_products must be flushed before the lookup query.
+        await self.db.flush()
+
+        mapping_result = await self.db.execute(
+            select(ProductShopMapping)
+            .where(ProductShopMapping.shop_id == shop.id)
+            .options(selectinload(ProductShopMapping.product))
+        )
+        product_by_sku = {
+            m.external_sku: m.product
+            for m in mapping_result.scalars().all()
+            if m.product is not None
+        }
+
+        product_ids = {p.id for p in product_by_sku.values()}
+        latest_by_product: Dict[Any, PriceHistory] = {}
+        if product_ids:
+            latest_result = await self.db.execute(
+                select(PriceHistory)
+                .where(PriceHistory.product_id.in_(product_ids))
+                .order_by(PriceHistory.product_id, desc(PriceHistory.created_at))
+                .distinct(PriceHistory.product_id)
+            )
+            latest_by_product = {h.product_id: h for h in latest_result.scalars().all()}
+
+        seen_in_batch: Dict[Any, Decimal] = {}
+        saved = 0
+        for item in prices:
+            external_sku = item.get("external_sku")
+            price = item.get("price")
+            if not external_sku or price is None:
+                continue
+            product = product_by_sku.get(str(external_sku))
+            if product is None:
+                continue
+            price = Decimal(str(price))
+
+            # Within one batch the same product can appear only once per shop,
+            # but a product can be listed by several shops in all_items — the
+            # batch tracker keeps the dedupe correct across those too.
+            if product.id in seen_in_batch:
+                if seen_in_batch[product.id] == price:
+                    continue
+            else:
+                latest = latest_by_product.get(product.id)
+                if latest is not None and Decimal(str(latest.price)) == price:
+                    seen_in_batch[product.id] = price
+                    continue
+
+            self.db.add(
+                PriceHistory(
+                    product_id=product.id,
+                    shop_id=shop.id,
+                    marketplace=shop.marketplace,
+                    price=price,
+                )
+            )
+            seen_in_batch[product.id] = price
+            latest_by_product[product.id] = None  # force a row on next change
+            saved += 1
+        return saved
 
     async def _save_finance_transactions(
         self,

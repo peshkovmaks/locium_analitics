@@ -121,6 +121,38 @@ class Product(Base):
     shop_products = relationship(
         "ShopProduct", back_populates="product", cascade="all, delete-orphan"
     )
+    price_history = relationship(
+        "PriceHistory",
+        back_populates="product",
+        cascade="all, delete-orphan",
+        order_by="asc(PriceHistory.created_at)",
+    )
+
+
+class PriceHistory(Base):
+    __tablename__ = "price_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    shop_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("shops.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    marketplace = Column(Enum(Marketplace), nullable=True)
+    price = Column(Numeric(12, 2), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        Index("ix_price_history_product_created", "product_id", "created_at"),
+    )
+
+    product = relationship("Product", back_populates="price_history")
 
 
 class ShopProduct(Base):
@@ -254,6 +286,30 @@ class ProductShopMapping(Base):
 
     product = relationship("Product", back_populates="mappings")
     shop = relationship("Shop")
+
+
+class MonthlyTarget(Base):
+    __tablename__ = "monthly_targets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    month = Column(Date, nullable=False)  # первое число месяца
+    targets = Column(JSONB, default=dict, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "month", name="uix_monthly_target_user_month"),
+    )
+
+    user = relationship("User")
 
 
 class FinanceTransaction(Base):

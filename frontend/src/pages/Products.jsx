@@ -7,6 +7,135 @@ function formatMoney(v) {
   return n.toLocaleString('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 });
 }
 
+function formatDate(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+const REC_BADGES = {
+  raise: { label: 'Повысить', cls: 'bg-amber-100 text-amber-700' },
+  keep: { label: 'Оставить', cls: 'bg-green-100 text-green-700' },
+  lower: { label: 'Снизить', cls: 'bg-sky-100 text-sky-700' },
+};
+
+function RecommendationBadge({ rec }) {
+  if (!rec || !REC_BADGES[rec.action]) return <span className="text-gray-400">—</span>;
+  const badge = REC_BADGES[rec.action];
+  const title = rec.recommended_price != null
+    ? `Рекомендуемая цена: ${formatMoney(rec.recommended_price)}`
+    : 'Недостаточно данных для расчёта';
+  return (
+    <span
+      title={title}
+      className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${badge.cls}`}
+    >
+      {badge.label}
+      {rec.recommended_price != null && (
+        <span className="ml-1 opacity-70">{formatMoney(rec.recommended_price)}</span>
+      )}
+    </span>
+  );
+}
+
+function PriceSparkline({ points }) {
+  const W = 520;
+  const H = 140;
+  const PAD = 10;
+
+  if (!points || points.length === 0) {
+    return <div className="text-sm text-gray-500 py-8 text-center">Истории цен пока нет — она появится после синхронизаций.</div>;
+  }
+
+  const prices = points.map((p) => Number(p.price));
+  const min = Math.min(...prices);
+  const max = Math.max(...prices);
+  const span = max - min || 1;
+  const stepX = points.length > 1 ? (W - PAD * 2) / (points.length - 1) : 0;
+  const coords = points.map((p, i) => [
+    PAD + i * stepX,
+    H - PAD - ((Number(p.price) - min) / span) * (H - PAD * 2),
+  ]);
+  const path = coords
+    .map((c, i) => `${i === 0 ? 'M' : 'L'}${c[0].toFixed(1)},${c[1].toFixed(1)}`)
+    .join(' ');
+  const last = coords[coords.length - 1];
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+        <path d={path} fill="none" stroke="#2563eb" strokeWidth="2" />
+        {coords.map((c, i) => (
+          <circle key={i} cx={c[0]} cy={c[1]} r="2.5" fill="#2563eb">
+            <title>{`${formatMoney(points[i].price)} · ${formatDate(points[i].created_at)}`}</title>
+          </circle>
+        ))}
+        {last && <circle cx={last[0]} cy={last[1]} r="4" fill="#1d4ed8" />}
+      </svg>
+      <div className="flex justify-between text-xs text-gray-500 mt-1">
+        <span>
+          {formatDate(points[0].created_at)} — {formatDate(points[points.length - 1].created_at)}
+        </span>
+        <span>
+          мин {formatMoney(min)} · макс {formatMoney(max)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function PriceHistoryModal({ product, onClose }) {
+  const [points, setPoints] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    products
+      .priceHistory(product.id)
+      .then((data) => {
+        if (!cancelled) setPoints(data);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [product.id]);
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">{product.name}</h2>
+            <p className="text-xs font-mono text-gray-500">{product.canonical_sku || product.sku}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+            aria-label="Закрыть"
+          >
+            ×
+          </button>
+        </div>
+        {error && <div className="text-sm text-red-600 mb-3">Ошибка: {error}</div>}
+        {points === null ? (
+          <div className="text-sm text-gray-500 py-8 text-center">Загрузка...</div>
+        ) : (
+          <PriceSparkline points={points} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Products() {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -16,6 +145,7 @@ export default function Products() {
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [merging, setMerging] = useState(false);
+  const [historyProduct, setHistoryProduct] = useState(null);
 
   useEffect(() => {
     load();
@@ -119,6 +249,7 @@ export default function Products() {
               <th className="px-6 py-3 font-medium">Название</th>
               <th className="px-6 py-3 font-medium text-right">Себестоимость</th>
               <th className="px-6 py-3 font-medium text-right">Мин. цена</th>
+              <th className="px-6 py-3 font-medium text-center">Рекомендация</th>
               <th className="px-6 py-3 font-medium text-center">Действие</th>
             </tr>
           </thead>
@@ -126,12 +257,17 @@ export default function Products() {
             {list.map((p) => {
               const sku = getSku(p); // ← вот тут берём канонический SKU
               return (
-                <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
+                <tr
+                  key={p.id}
+                  className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
+                  onClick={() => setHistoryProduct(p)}
+                >
                   <td className="px-4 py-3">
                     <input
                       type="checkbox"
                       checked={selected.has(sku)}
                       onChange={() => toggleSku(sku)}
+                      onClick={(e) => e.stopPropagation()}
                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
                   </td>
@@ -153,8 +289,14 @@ export default function Products() {
                   </td>
                   <td className="px-6 py-3 text-right">{formatMoney(p.min_price)}</td>
                   <td className="px-6 py-3 text-center">
+                    <RecommendationBadge rec={p.price_recommendation} />
+                  </td>
+                  <td className="px-6 py-3 text-center">
                     {editingSku === sku ? (
-                      <div className="flex items-center justify-center gap-2">
+                      <div
+                        className="flex items-center justify-center gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <button
                           onClick={() => saveCost(sku)}
                           disabled={saving}
@@ -171,7 +313,8 @@ export default function Products() {
                       </div>
                     ) : (
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setEditingSku(sku);
                           setEditValue(p.cost_price);
                         }}
@@ -191,6 +334,9 @@ export default function Products() {
         <div className="p-12 text-center text-gray-500">
           Товары не найдены. Выполните синхронизацию магазина — товары создадутся автоматически.
         </div>
+      )}
+      {historyProduct && (
+        <PriceHistoryModal product={historyProduct} onClose={() => setHistoryProduct(null)} />
       )}
     </div>
   );
